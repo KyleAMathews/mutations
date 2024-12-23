@@ -6,7 +6,9 @@ export interface MutationOptions {
 
 export interface CollectionOptions<T> {
   validate?: (item: T) => boolean | Promise<boolean>
-  onMutation?: (changes: any[]) => Promise<void>
+  onMutation?: (
+    changes: { type: `insert` | `update` | `remove`; item: T }[]
+  ) => Promise<void>
 }
 
 export class Collection<T extends object> {
@@ -18,15 +20,17 @@ export class Collection<T extends object> {
     if (this.options.validate) {
       const isValid = await this.options.validate(item)
       if (!isValid) {
-        throw new Error('Invalid item')
+        throw new Error(`Invalid item`)
       }
     }
 
-    const transaction = options.transaction || new Transaction({
-      onCommit: async () => {
-        await this.options.onMutation?.([{ type: 'insert', item }])
-      }
-    })
+    const transaction =
+      options.transaction ||
+      new Transaction({
+        onCommit: async () => {
+          await this.options.onMutation?.([{ type: `insert`, item }])
+        },
+      })
 
     const trackedItem = transaction.track(item)
     this.items.push(trackedItem)
@@ -45,14 +49,16 @@ export class Collection<T extends object> {
   ): Promise<void> {
     const index = this.items.indexOf(item)
     if (index === -1) {
-      throw new Error('Item not found')
+      throw new Error(`Item not found`)
     }
 
-    const transaction = options.transaction || new Transaction({
-      onCommit: async () => {
-        await this.options.onMutation?.([{ type: 'update', item }])
-      }
-    })
+    const transaction =
+      options.transaction ||
+      new Transaction({
+        onCommit: async () => {
+          await this.options.onMutation?.([{ type: `update`, item }])
+        },
+      })
 
     const trackedItem = transaction.track(item)
     updater(trackedItem)
@@ -60,7 +66,7 @@ export class Collection<T extends object> {
     if (this.options.validate) {
       const isValid = await this.options.validate(trackedItem)
       if (!isValid) {
-        throw new Error('Invalid update')
+        throw new Error(`Invalid update`)
       }
     }
 
@@ -72,14 +78,16 @@ export class Collection<T extends object> {
   async remove(item: T, options: MutationOptions = {}): Promise<void> {
     const index = this.items.indexOf(item)
     if (index === -1) {
-      throw new Error('Item not found')
+      throw new Error(`Item not found`)
     }
 
-    const transaction = options.transaction || new Transaction({
-      onCommit: async () => {
-        await this.options.onMutation?.([{ type: 'remove', item }])
-      }
-    })
+    const transaction =
+      options.transaction ||
+      new Transaction({
+        onCommit: async () => {
+          await this.options.onMutation?.([{ type: `remove`, item }])
+        },
+      })
 
     this.items.splice(index, 1)
 

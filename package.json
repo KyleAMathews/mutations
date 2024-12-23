@@ -1,11 +1,30 @@
 {
   "name": "@electric-sql/mutations",
-  "version": "0.1.0",
   "description": "Client-side mutations library",
-  "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "version": "0.1.0",
+  "author": "ElectricSQL",
+  "dependencies": {
+    "@electric-sql/pglite": "^0.2.15",
+    "postgres": "^3.4.5",
+    "proxy-compare": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11",
+    "prettier": "^3.1.1",
+    "rimraf": "^5.0.5",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,47 +36,35 @@
     "dist",
     "README.md"
   ],
+  "keywords": [
+    "mutations",
+    "optimistic-updates",
+    "state-management",
+    "transactions"
+  ],
+  "license": "MIT",
+  "lint-staged": {
+    "**/*.{js,jsx,ts,tsx}": [
+      "eslint --fix"
+    ]
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
   "scripts": {
     "build": "tsup",
     "clean": "rimraf dist",
     "dev": "tsup --watch",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format": "eslint \"**/*.{js,jsx,ts,tsx}\" --fix",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix",
-    "prepare": "npm run build",
+    "postversion": "git push && git push --tags",
+    "prepare": "pnpm run build",
     "prepublishOnly": "npm test && npm run lint",
     "preversion": "npm run lint",
     "setup-db": "ts-node tests/setup/setup-db.ts",
     "test": "vitest",
     "typecheck": "tsc --noEmit",
-    "version": "npm run format && git add -A src",
-    "postversion": "git push && git push --tags"
+    "version": "npm run format && git add -A src"
   },
-  "keywords": [
-    "mutations",
-    "state-management",
-    "optimistic-updates",
-    "transactions"
-  ],
-  "author": "ElectricSQL",
-  "license": "MIT",
-  "devDependencies": {
-    "@types/node": "^22.10.2",
-    "@typescript-eslint/eslint-plugin": "^6.15.0",
-    "@typescript-eslint/parser": "^6.15.0",
-    "eslint": "^8.56.0",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-prettier": "^5.1.1",
-    "prettier": "^3.1.1",
-    "rimraf": "^5.0.5",
-    "ts-node": "^10.9.2",
-    "tsup": "^8.3.5",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
-  },
-  "dependencies": {
-    "@electric-sql/pglite": "^0.2.15",
-    "postgres": "^3.4.5",
-    "proxy-compare": "^3.0.1"
-  }
+  "type": "module",
+  "types": "./dist/index.d.ts"
 }

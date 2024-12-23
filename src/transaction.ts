@@ -1,27 +1,34 @@
 import { createMutationProxy } from './proxy'
 
-export type TransactionState = 'pending' | 'committed' | 'rolled-back'
+export type TransactionState = `pending` | `committed` | `rolled-back`
 
 export class Transaction {
   private changes: Array<{
     target: object
-    change: any
+    change: {
+      type: `set` | `delete`
+      path: string[]
+      previousValue: unknown
+    }
   }> = []
-  private state: TransactionState = 'pending'
+  private state: TransactionState = `pending`
   private locks = new WeakSet<object>()
+  private _data: Record<string, unknown>
 
-  constructor(private options: {
-    onCommit?: () => Promise<void> | void
-    onRollback?: () => Promise<void> | void
-  } = {}) {}
+  constructor(
+    private options: {
+      onCommit?: () => Promise<void> | void
+      onRollback?: () => Promise<void> | void
+    } = {}
+  ) {}
 
   track<T extends object>(target: T): T {
-    if (this.state !== 'pending') {
-      throw new Error('Cannot track changes in a non-pending transaction')
+    if (this.state !== `pending`) {
+      throw new Error(`Cannot track changes in a non-pending transaction`)
     }
 
     if (this.locks.has(target)) {
-      throw new Error('Object is already locked by another transaction')
+      throw new Error(`Object is already locked by another transaction`)
     }
 
     this.locks.add(target)
@@ -37,13 +44,13 @@ export class Transaction {
   }
 
   async commit(): Promise<void> {
-    if (this.state !== 'pending') {
-      throw new Error('Transaction is not pending')
+    if (this.state !== `pending`) {
+      throw new Error(`Transaction is not pending`)
     }
 
     try {
       await this.options.onCommit?.()
-      this.state = 'committed'
+      this.state = `committed`
     } catch (error) {
       await this.rollback()
       throw error
@@ -53,25 +60,33 @@ export class Transaction {
   }
 
   async rollback(): Promise<void> {
-    if (this.state !== 'pending') {
-      throw new Error('Transaction is not pending')
+    if (this.state !== `pending`) {
+      throw new Error(`Transaction is not pending`)
     }
 
     try {
       // Reverse changes in opposite order
       for (let i = this.changes.length - 1; i >= 0; i--) {
         const { target, change } = this.changes[i]
-        if (change.type === 'set') {
+        if (change.type === `set`) {
           // Restore previous value
-          Reflect.set(target, change.path[change.path.length - 1], change.previousValue)
-        } else if (change.type === 'delete') {
+          Reflect.set(
+            target,
+            change.path[change.path.length - 1],
+            change.previousValue
+          )
+        } else if (change.type === `delete`) {
           // Restore deleted property
-          Reflect.set(target, change.path[change.path.length - 1], change.previousValue)
+          Reflect.set(
+            target,
+            change.path[change.path.length - 1],
+            change.previousValue
+          )
         }
       }
 
       await this.options.onRollback?.()
-      this.state = 'rolled-back'
+      this.state = `rolled-back`
     } finally {
       this.clearLocks()
     }

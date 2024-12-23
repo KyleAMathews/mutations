@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite'
 
 async function main() {
   const pglite = new PGlite()
-  
+
   // Create mutations table
   await pglite.query(`
     CREATE TABLE mutations (
