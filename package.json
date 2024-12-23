@@ -1,7 +1,7 @@
 {
   "name": "@electric-sql/mutations",
   "version": "0.1.0",
-  "description": "A proxy-based mutations library with optimistic updates and transaction support",
+  "description": "Client-side mutations library",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -19,9 +19,18 @@
   ],
   "scripts": {
     "build": "tsup",
+    "clean": "rimraf dist",
     "dev": "tsup --watch",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm test && npm run lint",
+    "preversion": "npm run lint",
+    "setup-db": "ts-node tests/setup/setup-db.ts",
     "test": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "version": "npm run format && git add -A src",
+    "postversion": "git push && git push --tags"
   },
   "keywords": [
     "mutations",
@@ -33,11 +42,22 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.1",
+    "prettier": "^3.1.1",
+    "rimraf": "^5.0.5",
+    "ts-node": "^10.9.2",
     "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.2.15",
+    "postgres": "^3.4.5",
     "proxy-compare": "^3.0.1"
   }
 }

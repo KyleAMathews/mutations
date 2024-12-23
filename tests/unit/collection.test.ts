@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { Collection } from './collection'
+import { Collection } from '../../src/collection'
+import { DeltaOperation } from '../../src/delta'
 
 describe('Collection', () => {
   it('should track mutations on inserted items', async () => {

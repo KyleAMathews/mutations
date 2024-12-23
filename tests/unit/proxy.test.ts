@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createMutationProxy, isChanged, getUntracked, markToTrack } from './proxy'
-import { DeltaOperation } from './delta'
+import { createMutationProxy, isChanged, getUntracked, markToTrack } from '../../src/proxy'
+import { DeltaOperation } from '../../src/delta'
 
 describe('createMutationProxy', () => {
   it('should track simple property mutations', () => {
