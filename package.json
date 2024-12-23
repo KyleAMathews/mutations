@@ -12,6 +12,7 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "husky": "^9.1.7",
     "lint-staged": "^15.2.11",
     "typescript": "^5.3.3"
   }

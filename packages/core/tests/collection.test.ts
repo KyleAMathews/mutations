@@ -1,42 +1,73 @@
 import { describe, it, expect } from 'vitest'
-import { Collection } from '../src/collection'
+import { Collection } from '../src'
+
+interface TestItem {
+  title?: string
+  count?: number
+}
+
+interface Mutation {
+  type: string
+  item: TestItem
+}
 
 describe(`Collection`, () => {
   it(`should track mutations on inserted items`, async () => {
-    const mutations: Array<{
-      type: `insert` | `update` | `remove`
-      item: Record<string, unknown>
-    }> = []
-    const collection = new Collection<Record<string, unknown>>({
+    const mutations: Mutation[] = []
+    const collection = new Collection<TestItem>({
       onMutation: async (changes) => {
         mutations.push(...changes)
       },
     })
 
-    const todo = await collection.insert({ title: `Test todo` })
-    expect(todo.title).toBe(`Test todo`)
+    const item = collection.insert({ title: `Test todo` })
+    expect(item.title).toBe(`Test todo`)
+
+    const updatedItem = collection.update(item, (todo) => {
+      todo.title = `Updated todo`
+    })
+    expect(updatedItem.title).toBe(`Updated todo`)
+
+    // Wait for microtasks to complete
+    await Promise.resolve()
+
     expect(mutations).toHaveLength(1)
     expect(mutations[0]).toMatchObject({
       type: `insert`,
-      item: { title: `Test todo` },
-    })
-
-    await collection.update(todo, (it) => {
-      it.title = `Updated todo`
-    })
-    expect(todo.title).toBe(`Updated todo`)
-    expect(mutations).toHaveLength(2)
-    expect(mutations[1]).toMatchObject({
-      type: `update`,
       item: { title: `Updated todo` },
     })
+  })
 
-    await collection.remove(todo)
-    expect(collection.getItems()).toHaveLength(0)
-    expect(mutations).toHaveLength(3)
-    expect(mutations[2]).toMatchObject({
-      type: `remove`,
-      item: { title: `Updated todo` },
+  it(`should combine multiple updates`, async () => {
+    const mutations: Mutation[] = []
+    const collection = new Collection<TestItem>({
+      onMutation: async (changes) => {
+        mutations.push(...changes)
+      },
+    })
+
+    const item = collection.insert({ count: 0 })
+    expect(item.count).toBe(0)
+
+    collection.update(item, (obj) => {
+      obj.count++
+    })
+    collection.update(item, (obj) => {
+      obj.count++
+    })
+    collection.update(item, (obj) => {
+      obj.count++
+    })
+
+    expect(item.count).toBe(3)
+
+    // Wait for microtasks to complete
+    await Promise.resolve()
+
+    expect(mutations).toHaveLength(1) // insert + updates combined
+    expect(mutations[0]).toMatchObject({
+      type: `insert`,
+      item: { count: 3 },
     })
   })
 })

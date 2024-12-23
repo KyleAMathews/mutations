@@ -18,6 +18,7 @@ export function createMutationProxy<T extends object>(
   // Create WeakMaps for tracking state and cache
   const affected = new WeakMap()
   const proxyCache = new WeakMap()
+  const changes = new Map<string, unknown>()
 
   // Initialize affected WeakMap with the target object
   affected.set(target, new Map())
@@ -51,6 +52,32 @@ export function createMutationProxy<T extends object>(
     }
   }
 
+  // Helper to get the current value
+  const getValue = (prop: string | symbol): unknown => {
+    const currentPath = typeof prop === `symbol` ? prop.toString() : prop
+    if (changes.has(currentPath)) {
+      return changes.get(currentPath)
+    }
+
+    const value = Reflect.get(target, prop)
+    if (Array.isArray(value)) {
+      return [...value]
+    }
+    if (value instanceof Set) {
+      return new Set(value)
+    }
+    if (value instanceof Map) {
+      return new Map(value)
+    }
+    return value
+  }
+
+  // Helper to set a value
+  const setValue = (prop: string | symbol, value: unknown) => {
+    const currentPath = typeof prop === `symbol` ? prop.toString() : prop
+    changes.set(currentPath, value)
+  }
+
   // Create a proxy to track property access
   const trackingProxy = createProxy(target, affected, proxyCache)
 
@@ -70,8 +97,8 @@ export function createMutationProxy<T extends object>(
         return value
       }
 
-      // Get value from target
-      const value = Reflect.get(target, prop, receiver)
+      // Get value
+      const value = getValue(prop)
 
       // Track access using proxy-compare
       Reflect.get(trackingProxy, prop)
@@ -89,7 +116,11 @@ export function createMutationProxy<T extends object>(
         ]
         if (arrayMethods.includes(prop as string)) {
           return function (...args: unknown[]) {
-            const result = value.apply(target, args)
+            // Get current array state
+            const array = Array.from(target)
+            const result = Array.prototype[
+              prop as keyof typeof Array.prototype
+            ].apply(array, args)
             const currentPath = path.join(`.`)
 
             switch (prop) {
@@ -123,10 +154,15 @@ export function createMutationProxy<T extends object>(
 
               case `sort`:
               case `reverse`:
-                // For sort/reverse, we need to capture the full new array
-                delta.$set![currentPath] = [...target]
+                delta.$set![currentPath] = array
                 break
             }
+
+            // Store the new array state
+            for (let i = 0; i < array.length; i++) {
+              setValue(i, array[i])
+            }
+            setValue(`length`, array.length)
 
             emitDelta()
             return result
@@ -147,10 +183,13 @@ export function createMutationProxy<T extends object>(
 
         if (methodsToTrack.includes(prop as string)) {
           return function (...args: unknown[]) {
-            const result = value.apply(target, args)
-            // For Set/Map mutations, we track the entire new value
-            delta.$set![currentPath] =
+            const collection =
               target instanceof Set ? new Set(target) : new Map(target)
+            const result = collection[
+              prop as keyof (Set<unknown> | Map<unknown, unknown>)
+            ](...args)
+            setValue(prop, collection)
+            delta.$set![currentPath] = collection
             emitDelta()
             return result
           }
@@ -164,7 +203,8 @@ export function createMutationProxy<T extends object>(
           affected.set(value, new Map())
         }
 
-        return createMutationProxy(
+        // Create a new proxy for this nested object
+        const nestedProxy = createMutationProxy(
           value,
           {
             onMutation: (childDelta) => {
@@ -182,7 +222,12 @@ export function createMutationProxy<T extends object>(
           },
           [...path, prop]
         )
+
+        // Store the proxy so we return the same one next time
+        setValue(prop, nestedProxy)
+        return nestedProxy
       }
+
       return value
     },
 
@@ -198,11 +243,11 @@ export function createMutationProxy<T extends object>(
         }
       }
 
-      const prevValue = Reflect.get(target, prop, receiver)
-      const result = Reflect.set(target, prop, value, receiver)
+      const prevValue = getValue(prop)
+      setValue(prop, value)
 
       // Only emit if the value has actually changed
-      if (result && prevValue !== value) {
+      if (prevValue !== value) {
         // Create objects for comparison with only the changed property
         const prevObj = { [prop]: prevValue }
         const nextObj = { [prop]: value }
@@ -214,7 +259,7 @@ export function createMutationProxy<T extends object>(
         }
       }
 
-      return result
+      return true
     },
 
     deleteProperty(target, prop) {
@@ -222,22 +267,20 @@ export function createMutationProxy<T extends object>(
         return Reflect.deleteProperty(target, prop)
       }
 
-      const prevValue = Reflect.get(target, prop)
-      const result = Reflect.deleteProperty(target, prop)
+      const prevValue = getValue(prop)
+      setValue(prop, undefined)
 
-      if (result) {
-        // Create objects for comparison
-        const prevObj = { [prop]: prevValue }
-        const nextObj = { [prop]: undefined }
+      // Create objects for comparison
+      const prevObj = { [prop]: prevValue }
+      const nextObj = { [prop]: undefined }
 
-        if (isChanged(prevObj, nextObj, affected)) {
-          const currentPath = [...path, prop].join(`.`)
-          delta.$unset![currentPath] = true
-          emitDelta()
-        }
+      if (isChanged(prevObj, nextObj, affected)) {
+        const currentPath = [...path, prop].join(`.`)
+        delta.$unset![currentPath] = true
+        emitDelta()
       }
 
-      return result
+      return true
     },
   })
 

@@ -5,17 +5,20 @@
 The evolution of client-side mutation systems reflects the changing nature of web applications:
 
 1. **Early Web (1990s-2000s)**
+
    - Form submissions with full page reloads
    - Server-side state management
    - Limited client-side state
 
 2. **Ajax Era (2000s)**
+
    - Client-side state management emerges
    - Callback-based mutations
    - Manual optimistic updates
    - Complex error handling
 
 3. **SPA Era (2010s)**
+
    - Client-side state becomes crucial
    - Frameworks like Backbone introduce structured mutations
    - Promise-based APIs
@@ -33,6 +36,7 @@ The evolution of client-side mutation systems reflects the changing nature of we
 Several modern systems handle client-side mutations:
 
 ### React Query/TanStack Query
+
 - Strengths:
   - Mature caching system
   - Strong TypeScript support
@@ -43,6 +47,7 @@ Several modern systems handle client-side mutations:
   - No direct proxy-based mutations
 
 ### Firebase/Firestore
+
 - Strengths:
   - Real-time by default
   - Simple API
@@ -53,6 +58,7 @@ Several modern systems handle client-side mutations:
   - Less control over synchronization
 
 ### Apollo Client
+
 - Strengths:
   - Strong GraphQL integration
   - Normalized caching
@@ -63,6 +69,7 @@ Several modern systems handle client-side mutations:
   - Heavy-weight
 
 ### SWR
+
 - Strengths:
   - Simple mental model
   - Good stale-while-revalidate pattern
@@ -77,16 +84,19 @@ Several modern systems handle client-side mutations:
 Our library focuses on several key objectives:
 
 1. **Natural Mutation API**
+
    - Direct manipulation of data structures
    - Proxy-based change tracking
    - Minimal boilerplate
 
 2. **Strong Optimistic Update Support**
+
    - Immediate UI updates
    - Automatic rollback on failure
    - Clear pending state handling
 
 3. **Flexible Backend Integration**
+
    - Support various API patterns
    - Custom mutation handlers
    - Transaction support
@@ -102,51 +112,55 @@ Our library focuses on several key objectives:
 
 ```typescript
 // Each collection gets its own mutations with automatic validation
-const { data: todos, mutations: todoMutations } = useSyncedCollection('todos');
-const { data: tags, mutations: tagMutations } = useSyncedCollection('tags');
+const { data: todos, mutations: todoMutations } = useSyncedCollection('todos')
+const { data: tags, mutations: tagMutations } = useSyncedCollection('tags')
 
 // Insert with immediate feedback
-const { pending: todo, committed } = todoMutations.insert({ 
-  title: "New Todo" 
-});
+const { pending: todo, committed } = todoMutations.insert({
+  title: 'New Todo',
+})
 
 // Update with proxy tracking
-await todoMutations.update(todo, it => {
-  it.title = "Updated";
-  it.count += 1;
-});
+await todoMutations.update(todo, (it) => {
+  it.title = 'Updated'
+  it.count += 1
+})
 
 // Remove items
-await todoMutations.remove(todo);
+await todoMutations.remove(todo)
 ```
 
 ### Cross-Collection Transactions
 
 ```typescript
 // Transaction hook returns stable transaction object
-const transaction = useTransaction();
+const transaction = useTransaction()
 
 const addTodoWithTags = async () => {
   // Use transaction directly
-  todoMutations.insert({ text: "New Todo" }, { transaction });
-  tagMutations.insert({ name: "urgent" }, { transaction });
-  
+  todoMutations.insert({ text: 'New Todo' }, { transaction })
+  tagMutations.insert({ name: 'urgent' }, { transaction })
+
   // Commit all changes
-  await transaction.commit();
-};
+  await transaction.commit()
+}
 
 // Multiple independent transactions
 function ComplexOperation() {
-  const mainTx = useTransaction();
-  const sideEffectTx = useTransaction();
-  
+  const mainTx = useTransaction()
+  const sideEffectTx = useTransaction()
+
   const performOperation = async () => {
-    todoMutations.update(todo, it => it.status = 'done', { transaction: mainTx });
-    statsMutations.update(stats, it => it.count++, { transaction: sideEffectTx });
-    
-    await mainTx.commit();
-    await sideEffectTx.commit();
-  };
+    todoMutations.update(todo, (it) => (it.status = 'done'), {
+      transaction: mainTx,
+    })
+    statsMutations.update(stats, (it) => it.count++, {
+      transaction: sideEffectTx,
+    })
+
+    await mainTx.commit()
+    await sideEffectTx.commit()
+  }
 }
 ```
 
@@ -157,18 +171,18 @@ function ComplexOperation() {
 const { mutations } = useSyncedCollection('todos', {
   // Sync options
   schema: todosSchema, // Zod schema for todos
-});
+})
 
 // This will throw if it doesn't match schema
 mutations.insert({
-  title: "New Todo",
-  invalidField: "oops" // Type error + runtime validation error
-});
+  title: 'New Todo',
+  invalidField: 'oops', // Type error + runtime validation error
+})
 ```
 
 ### Error Handling
 
-```typescript
+````typescript
 ## Error Handling
 
 Multiple levels of error handling are supported:
@@ -182,6 +196,18 @@ We chose to use proxies for change tracking because:
 - Automatic change detection
 - No manual diff tracking needed
 - Efficient dependency tracking
+
+A key principle is that backend-synced data is treated as immutable. The proxy system:
+- Captures all mutation attempts without modifying the underlying data
+- Records changes for later synchronization with the backend
+- Only updates local state once changes are confirmed by the backend
+- Maintains a clean separation between pending and committed states
+
+This immutability guarantee ensures:
+- Data consistency with the backend
+- Clean rollback of failed mutations
+- Predictable optimistic updates
+- Efficient change tracking without data copying
 
 ### 2. Transaction Locking
 Our transaction system:
@@ -221,40 +247,53 @@ const { mutations } = useSyncedCollection('todos', {
     }
   }
 });
-```
+````
 
 Collections maintain their own validation and sync behavior while still participating in shared transactions.
+
+## Synchronous Validation
+
+All client-side mutations must be synchronously validated. This ensures that mutations are rendered in the next frame, providing immediate feedback to users. While persistence may happen asynchronously in the background, the validation of data must be synchronous.
+
+This design decision has several benefits:
+
+1. Immediate feedback to users about invalid data
+2. Consistent UI updates without waiting for async validation
+3. Simpler programming model as all validation happens synchronously
 
 ## Error Handling
 
 Multiple levels of error handling are supported:
 
 ### Operation Level
+
 ```typescript
 try {
-  await mutations.update(item, it => {
-    it.title = "New Title";
-  });
+  await mutations.update(item, (it) => {
+    it.title = 'New Title'
+  })
 } catch (error) {
   // Automatic rollback has occurred
-  handleError(error);
+  handleError(error)
 }
 ```
 
 ### Transaction Level
+
 ```typescript
-const transaction = useTransaction();
+const transaction = useTransaction()
 try {
-  mutations.update(item1, it => it.title = "New", { transaction });
-  mutations.update(item2, it => it.status = "active", { transaction });
-  await transaction.commit();
+  mutations.update(item1, (it) => (it.title = 'New'), { transaction })
+  mutations.update(item2, (it) => (it.status = 'active'), { transaction })
+  await transaction.commit()
 } catch (error) {
   // All operations in transaction rolled back
-  handleError(error);
+  handleError(error)
 }
 ```
 
 ### Global Error Handling
+
 ```typescript
 function App() {
   // Access all transactions across the app
@@ -275,10 +314,10 @@ function App() {
 // Components can also access their own transaction errors
 function TodoList() {
   const { transactions } = useTransactionState();
-  
+
   return (
     <div>
-      {transactions.map(tx => 
+      {transactions.map(tx =>
         tx.error && (
           <ErrorBanner key={tx.id} error={tx.error} />
         )
@@ -296,14 +335,30 @@ All error handling includes automatic rollback of affected changes.
 ### 1. Proxy-Based Change Tracking
 
 We chose to use proxies for change tracking because:
+
 - Natural JavaScript mutation syntax
 - Automatic change detection
 - No manual diff tracking needed
 - Efficient dependency tracking
 
+A key principle is that backend-synced data is treated as immutable. The proxy system:
+
+- Captures all mutation attempts without modifying the underlying data
+- Records changes for later synchronization with the backend
+- Only updates local state once changes are confirmed by the backend
+- Maintains a clean separation between pending and committed states
+
+This immutability guarantee ensures:
+
+- Data consistency with the backend
+- Clean rollback of failed mutations
+- Predictable optimistic updates
+- Efficient change tracking without data copying
+
 ### 2. Transaction Locking
 
 Our transaction system:
+
 - Locks items when changed until commit
 - Prevents concurrent modifications
 - Stable transaction references from hook
@@ -314,6 +369,7 @@ Our transaction system:
 ### 3. The `{ pending, committed }` Pattern
 
 We return both immediate and committed states because:
+
 - Enables immediate UI updates
 - Clear way to track server confirmation
 - Consistent API for all operations
@@ -322,6 +378,7 @@ We return both immediate and committed states because:
 ### 4. Automatic Dependency Tracking
 
 We track component dependencies automatically:
+
 - No manual subscription management
 - Efficient rerenders
 - Natural code organization
@@ -338,16 +395,17 @@ const { mutations } = useSyncedCollection('todos', {
   // Mutation options
   mutations: {
     handleMutations: async (changes) => {
-      await yourApi.applyChanges(changes);
-      await waitForSync();
-    }
-  }
-});
+      await yourApi.applyChanges(changes)
+      await waitForSync()
+    },
+  },
+})
 ```
 
 Collections maintain their own validation and sync behavior while still participating in shared transactions.
 
 This enables:
+
 - Custom backend integration
 - Legacy API support
 - Complex workflow handling
@@ -358,6 +416,7 @@ This enables:
 ### Dev Tools
 
 We provide comprehensive dev tools:
+
 - Time-travel debugging
 - Transaction monitoring
 - Network logging
@@ -367,6 +426,7 @@ We provide comprehensive dev tools:
 ### Error Handling
 
 Multiple levels of error handling:
+
 - Per-operation error handling
 - Transaction-level errors
 - Global error monitoring
@@ -375,11 +435,13 @@ Multiple levels of error handling:
 ## Future Considerations
 
 1. **TanStack Query Integration**
+
    - Potential to integrate with their ecosystem
    - Leverage their infrastructure
    - Add our proxy-based mutations
 
 2. **Performance Optimizations**
+
    - Batching strategies
    - Change compaction
    - Dependency optimization
@@ -392,6 +454,7 @@ Multiple levels of error handling:
 ## Implementation Strategy
 
 Initial implementation focus:
+
 1. Core proxy tracking system
 2. Basic mutation operations
 3. Transaction support
@@ -402,6 +465,7 @@ Initial implementation focus:
 ## Migration Strategy
 
 For existing codebases:
+
 1. Introduce parallel usage
 2. Gradually migrate operations
 3. Add transaction support

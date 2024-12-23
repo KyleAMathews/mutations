@@ -1,4 +1,5 @@
-export * from './proxy'
 export * from './collection'
-export * from './delta'
 export * from './transaction'
+export * from './schema'
+export * from './proxy'
+export * from './delta'

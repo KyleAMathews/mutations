@@ -166,6 +166,24 @@ This library implements client-side mutations for ElectricSQL using a proxy-base
   - splice using array_cat and array slicing
   - Advanced operations (sort, filter, map)
 
+### Transaction Batching
+
+- Multiple updates in the same frame (microtask) are batched into a single transaction
+- The Collection class maintains a `currentTransaction` that's shared across all updates in the frame
+- Updates are collected and committed at the end of the frame using `queueMicrotask`
+- The mutation callback receives a single mutation that combines all changes:
+  - Type is based on the first operation (e.g., 'insert')
+  - Item reflects the final state after all updates
+- This approach ensures efficient batching while maintaining proper state management
+
+### Browser and Node.js Compatibility
+
+- Core functionality relies on standard features:
+  - `queueMicrotask`: Available in all modern browsers and Node.js since v11.0.0
+  - `crypto.randomUUID()`: Available in modern browsers (Chrome 92+, Firefox 95+, Safari 15.4+) and Node.js v14.17.0+
+- Fallback implementation provided for `crypto.randomUUID()` using Math.random() for older environments
+- All other features (Proxies, Maps, Sets, etc.) are well-supported in modern environments
+
 ### Testing
 
 - Unit tests for each component
