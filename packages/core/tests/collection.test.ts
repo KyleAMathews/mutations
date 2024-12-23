@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { Collection } from '../../src/collection'
+import { Collection } from '../src/collection'
 
 describe(`Collection`, () => {
   it(`should track mutations on inserted items`, async () => {

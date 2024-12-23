@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { createTestDb, applyMutations } from '../../src/postgres'
-import { DeltaOperation } from '../../src/delta'
+import { createTestDb, applyMutations } from '../src/postgres'
+import { DeltaOperation } from '@electric-sql/mutations-core'
 
 describe(`postgres mutations`, () => {
   it(`should apply simple mutations`, async () => {

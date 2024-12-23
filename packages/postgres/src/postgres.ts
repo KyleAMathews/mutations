@@ -1,5 +1,5 @@
-import { PGlite } from '@electric-sql/pglite'
-import { DeltaOperation } from './delta'
+import { PGlite as Database } from '@electric-sql/pglite'
+import { DeltaOperation } from '@electric-sql/mutations-core'
 
 // Helper type for the result of applying mutations
 export type MutationResult = {
@@ -48,7 +48,7 @@ function buildNestedJsonSet(
 }
 
 export async function applyMutations(
-  db: PGlite,
+  db: Database,
   tableName: string,
   rowId: string | number,
   deltas: DeltaOperation[]
@@ -175,7 +175,7 @@ export async function applyMutations(
 
 // Helper to create a test database connection
 export async function createTestDb() {
-  const db = new PGlite()
+  const db = new Database()
 
   // Create test table
   await db.query(`

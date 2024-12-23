@@ -1,0 +1,32 @@
+{
+  "name": "@electric-sql/mutations-core",
+  "version": "0.1.0",
+  "description": "Core mutation tracking system for ElectricSQL",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mutations",
+    "proxy",
+    "tracking"
+  ],
+  "author": "Electric SQL",
+  "license": "MIT",
+  "dependencies": {
+    "proxy-compare": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0"
+  }
+}

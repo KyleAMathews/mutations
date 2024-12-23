@@ -1,4 +1,9 @@
-import { isChanged, getUntracked, markToTrack } from 'proxy-compare'
+import {
+  createProxy,
+  isChanged,
+  getUntracked,
+  markToTrack,
+} from 'proxy-compare'
 import { DeltaOperation, isDeltaEmpty } from './delta'
 
 type ProxyHandler = {
@@ -10,8 +15,13 @@ export function createMutationProxy<T extends object>(
   handler: ProxyHandler,
   path: (string | number)[] = []
 ): T {
+  // Create WeakMaps for tracking state and cache
   const affected = new WeakMap()
   const proxyCache = new WeakMap()
+
+  // Initialize affected WeakMap with the target object
+  affected.set(target, new Map())
+
   const delta: DeltaOperation = {
     $set: {},
     $unset: {},
@@ -42,10 +52,10 @@ export function createMutationProxy<T extends object>(
   }
 
   // Create a proxy to track property access
-  const trackingProxy = createProxyCompare(target, affected, proxyCache)
+  const trackingProxy = createProxy(target, affected, proxyCache)
 
   // Create mutation proxy
-  return new Proxy(target, {
+  const proxy = new Proxy(trackingProxy, {
     get(target, prop, receiver) {
       if (typeof prop === `symbol`) {
         return Reflect.get(target, prop, receiver)
@@ -149,6 +159,11 @@ export function createMutationProxy<T extends object>(
       }
 
       if (value && typeof value === `object` && !(value instanceof RegExp)) {
+        // Initialize affected WeakMap for nested objects
+        if (!affected.has(value)) {
+          affected.set(value, new Map())
+        }
+
         return createMutationProxy(
           value,
           {
@@ -176,13 +191,27 @@ export function createMutationProxy<T extends object>(
         return Reflect.set(target, prop, value, receiver)
       }
 
-      const previousValue = Reflect.get(target, prop, receiver)
+      // Initialize affected WeakMap for new object values
+      if (value && typeof value === `object`) {
+        if (!affected.has(value)) {
+          affected.set(value, new Map())
+        }
+      }
+
+      const prevValue = Reflect.get(target, prop, receiver)
       const result = Reflect.set(target, prop, value, receiver)
 
-      if (result && !Object.is(previousValue, value)) {
-        const currentPath = [...path, prop].join(`.`)
-        delta.$set![currentPath] = value
-        emitDelta()
+      // Only emit if the value has actually changed
+      if (result && prevValue !== value) {
+        // Create objects for comparison with only the changed property
+        const prevObj = { [prop]: prevValue }
+        const nextObj = { [prop]: value }
+
+        if (isChanged(prevObj, nextObj, affected)) {
+          const currentPath = [...path, prop].join(`.`)
+          delta.$set![currentPath] = value
+          emitDelta()
+        }
       }
 
       return result
@@ -193,17 +222,26 @@ export function createMutationProxy<T extends object>(
         return Reflect.deleteProperty(target, prop)
       }
 
+      const prevValue = Reflect.get(target, prop)
       const result = Reflect.deleteProperty(target, prop)
 
       if (result) {
-        const currentPath = [...path, prop].join(`.`)
-        delta.$unset![currentPath] = true
-        emitDelta()
+        // Create objects for comparison
+        const prevObj = { [prop]: prevValue }
+        const nextObj = { [prop]: undefined }
+
+        if (isChanged(prevObj, nextObj, affected)) {
+          const currentPath = [...path, prop].join(`.`)
+          delta.$unset![currentPath] = true
+          emitDelta()
+        }
       }
 
       return result
     },
   })
+
+  return proxy as T
 }
 
 // Export proxy-compare utilities that might be useful for consumers
