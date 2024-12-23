@@ -17,6 +17,28 @@
 
 ## Timeline
 
+### 2024-12-23T09:18:30-07:00 [feat]
+- Implemented PostgreSQL mutation application
+- Added direct PGlite integration
+- Support for nested JSONB operations
+- Comprehensive array operation support
+- Transaction handling
+- Reorganized test structure into dedicated directory
+
+### 2024-12-23T08:36:00-07:00 [docs]
+- Updated AI memory with latest changes
+- Added project overview and key components
+- Documented delta operations, proxy system, collection management, and PostgreSQL integration
+- Outlined implementation details and recent changes
+
+### 2024-12-23T08:35:00-07:00 [feature] [test]
+- Updated mutation tracking system to work correctly for:
+  - Simple property changes
+  - Nested object mutations
+  - Array operations (push, pop, shift, unshift, splice)
+  - Special types (RegExp, BigInt)
+  - Set and Map operations
+
 ### 2024-12-23T08:33:30-07:00 [feature] [test]
 - Added support and tests for RegExp and BigInt handling
 - Special handling for RegExp objects to maintain method bindings
@@ -25,6 +47,19 @@
   - BigInt values and operations
   - Mixed RegExp and BigInt in complex objects
 - All 22 tests now passing
+
+### 2024-12-23T08:32:00-07:00 [feature]
+- Added support for Set and Map data structures
+- Implemented proxy handlers for Set/Map methods
+- Added tests for Set/Map operations
+
+### 2024-12-23T08:30:00-07:00 [feature]
+- Added support for array operations:
+  - push, pop, shift, unshift
+  - splice, slice
+  - sort, reverse
+  - map, filter, reduce
+- Added tests for array operations
 
 ### 2024-12-23T08:29:14-07:00 [docs]
 - Created this AI memory file
@@ -51,31 +86,81 @@
 - Replaced custom proxy implementation with battle-tested solution
 - Added proper handling for array operations and nested objects
 
-### 2024-12-23T07:59:07-07:00 [setup]
+### 2024-12-23T08:00:00-07:00 [init]
 - Initial project setup
-- Created core files:
-  - proxy.ts: Proxy-based change tracking
-  - transaction.ts: Transaction system
-  - collection.ts: Collection management
+- Added core mutation tracking system
 - Set up TypeScript configuration and build system
 - Added vitest for testing
 
-### 2024-12-23T08:35:00-07:00 [feature] [test]
-- Fixed initialization of delta operations in proxy to properly track all mutation types
-- Improved delta reset logic to correctly clear state after emitting changes
-- Enhanced Set and Map handling with proper mutation tracking
-- All tests now passing including complex cases like nested objects, arrays, and special types
-
-### 2024-12-23T08:35:00-07:00 [docs]
-- Updated mutation tracking system to work correctly for:
-  - Simple property changes
-  - Nested object mutations
-  - Array operations (push, pop, shift, unshift, splice)
+### 2024-12-22T16:45:00-07:00 [feat]
+- Initial implementation of mutation tracking
+- Added support for:
+  - Basic property changes
+  - Array operations
+  - Nested objects
   - Special types (RegExp, BigInt)
   - Set and Map operations
+
+## Changes
+# AI Memory for @electric-sql/mutations
+
+## Project Overview
+This library implements client-side mutations for ElectricSQL using a proxy-based system for change tracking. It allows tracking changes to JavaScript objects and arrays, and applying those changes to a PostgreSQL database.
+
+## Key Components
+
+### Delta Operations (`delta.ts`)
+- Defines the mutation operations ($set, $unset, $push, etc.)
+- Handles nested paths using -> notation for JSONB fields
+- Supports array operations (push, pull, splice, etc.)
+
+### Proxy System (`proxy.ts`)
+- Uses JavaScript Proxy to track changes to objects and arrays
+- Converts mutations into delta operations
+- Handles nested objects and array methods
+
+### Collection Management (`collection.ts`)
+- Manages collections of objects
+- Tracks changes using the proxy system
+- Aggregates deltas for batch updates
+
+### PostgreSQL Integration (`postgres.ts`)
+- Implements mutation application to PostgreSQL
+- Uses PGlite for database operations
+- Supports:
+  - Direct field updates
+  - Nested JSONB operations
+  - Array manipulations
+  - Transaction management
+
+## Implementation Details
+
+### Mutation Operations
+- **Simple Updates**: Direct field modifications
+- **Nested Updates**: Using JSONB operations (jsonb_set, #-)
+- **Array Operations**: 
+  - push/pull using array_append/array_remove
+  - splice using array_cat and array slicing
+  - Advanced operations (sort, filter, map)
+
+### Testing
+- Unit tests for each component
+- Integration tests for PostgreSQL operations
+- Test structure:
+  ```
+  tests/
+  ├── setup/
+  │   └── setup-db.ts
+  └── unit/
+      ├── collection.test.ts
+      ├── delta.test.ts
+      ├── postgres.test.ts
+      └── proxy.test.ts
+  ```
 
 ## Next Steps (Prioritized)
 1. Implement transaction support for batching multiple mutations
 2. Add schema validation for mutations
-3. Create React integration hooks
-4. Add documentation and examples
+3. Add support for optimistic updates
+4. Implement conflict resolution strategies
+5. Add performance optimizations for large datasets
