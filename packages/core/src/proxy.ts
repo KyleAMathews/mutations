@@ -1,24 +1,14 @@
 import {
-  createProxy,
-  isChanged,
-  getUntracked,
-  markToTrack,
+  createProxy as createTrackingProxy,
+  getUntracked as compareGetUntracked,
 } from 'proxy-compare'
-import { DeltaOperation, isDeltaEmpty } from './delta'
-
-type ProxyHandler = {
-  onMutation?: (delta: DeltaOperation) => void
-}
+import { DeltaOperation } from './delta'
 
 export function createMutationProxy<T extends object>(
-  target: T,
-  handler: ProxyHandler,
-  path: (string | number)[] = []
-): T {
-  // Create WeakMaps for tracking state and cache
+  target: T
+): T & { getDelta: () => DeltaOperation } {
   const affected = new WeakMap()
   const proxyCache = new WeakMap()
-  const changes = new Map<string, unknown>()
 
   // Initialize affected WeakMap with the target object
   affected.set(target, new Map())
@@ -35,257 +25,209 @@ export function createMutationProxy<T extends object>(
     $splice: {},
   }
 
-  // Helper to emit delta
-  const emitDelta = () => {
-    if (handler.onMutation && !isDeltaEmpty(delta)) {
-      handler.onMutation({ ...delta })
-      // Reset delta after emitting
-      delta.$set = {}
-      delta.$unset = {}
-      delta.$push = {}
-      delta.$pull = {}
-      delta.$pop = {}
-      delta.$addToSet = {}
-      delta.$append = {}
-      delta.$prepend = {}
-      delta.$splice = {}
-    }
-  }
+  function createNestedProxy(
+    obj: T,
+    currentPath: (string | number | symbol)[] = []
+  ): T {
+    if (obj === null || typeof obj !== `object`) return obj
+    if (obj.__isProxy) return obj
 
-  // Helper to get the current value
-  const getValue = (prop: string | symbol): unknown => {
-    const currentPath = typeof prop === `symbol` ? prop.toString() : prop
-    if (changes.has(currentPath)) {
-      return changes.get(currentPath)
-    }
+    // Don't proxy Date objects
+    if (obj instanceof Date) return obj
 
-    const value = Reflect.get(target, prop)
-    if (Array.isArray(value)) {
-      return [...value]
-    }
-    if (value instanceof Set) {
-      return new Set(value)
-    }
-    if (value instanceof Map) {
-      return new Map(value)
-    }
-    return value
-  }
+    // Don't proxy RegExp objects
+    if (obj instanceof RegExp) return obj
 
-  // Helper to set a value
-  const setValue = (prop: string | symbol, value: unknown) => {
-    const currentPath = typeof prop === `symbol` ? prop.toString() : prop
-    changes.set(currentPath, value)
-  }
-
-  // Create a proxy to track property access
-  const trackingProxy = createProxy(target, affected, proxyCache)
-
-  // Create mutation proxy
-  const proxy = new Proxy(trackingProxy, {
-    get(target, prop, receiver) {
-      if (typeof prop === `symbol`) {
-        return Reflect.get(target, prop, receiver)
+    // Create a function to build path string
+    function buildPath(path: (string | number | symbol)[]): string | symbol {
+      // If path has only one element and it's a symbol, return it as is
+      if (path.length === 1 && typeof path[0] === `symbol`) {
+        return path[0]
       }
+      // Otherwise join with dots, converting symbols to their description
+      return path
+        .map((p) => (typeof p === `symbol` ? p.description : p))
+        .join(`.`)
+    }
 
-      // Special handling for RegExp objects
-      if (target instanceof RegExp) {
-        const value = target[prop as keyof RegExp]
-        if (typeof value === `function`) {
-          return value.bind(target)
+    // Handle Set objects
+    if (obj instanceof Set) {
+      const setProxy = new Proxy(obj, {
+        get(target, prop, receiver) {
+          if (prop === `add`) {
+            return function (this: Set<unknown>, value: unknown): boolean {
+              const result = target.add(value)
+              const fullPath = buildPath(currentPath)
+              delta.$set[fullPath] = new Set([...target])
+              return result
+            }
+          }
+          return Reflect.get(target, prop, receiver)
+        },
+      })
+      return setProxy as Set<unknown>
+    }
+
+    // Handle Map objects
+    if (obj instanceof Map) {
+      const mapProxy = new Proxy(obj, {
+        get(target, prop, receiver) {
+          if (prop === `set`) {
+            return function (
+              this: Map<unknown, unknown>,
+              key: unknown,
+              value: unknown
+            ): this {
+              const result = target.set(key, value)
+              const fullPath = buildPath(currentPath)
+              delta.$set[fullPath] = new Map(target)
+              return result
+            }
+          }
+          return Reflect.get(target, prop, receiver)
+        },
+      })
+      return mapProxy as Map<unknown, unknown>
+    }
+
+    // Create a tracking proxy for change detection
+    const trackingProxy = createTrackingProxy(obj, affected, proxyCache)
+
+    // Create mutation proxy
+    const nestedProxy = new Proxy(trackingProxy, {
+      get(target, prop, receiver) {
+        if (prop === `__isProxy`) return true
+        if (prop === `getDelta`) {
+          return () => {
+            const result: DeltaOperation = {}
+
+            // Only include non-empty operations
+            for (const key of Object.keys(delta)) {
+              const op = key as keyof DeltaOperation
+              if (Object.keys(delta[op]).length > 0) {
+                if (!result[op]) {
+                  result[op] = {}
+                }
+                result[op] = { ...delta[op] }
+              }
+            }
+
+            return result
+          }
         }
-        return value
-      }
 
-      // Get value
-      const value = getValue(prop)
+        const value = Reflect.get(target, prop, receiver)
 
-      // Track access using proxy-compare
-      Reflect.get(trackingProxy, prop)
+        if (typeof value === `function`) {
+          // Handle method calls
+          return function (this: unknown, ...args: unknown[]) {
+            const result = value.apply(target, args)
+            const fullPath = buildPath(currentPath)
+            const method = prop.toString()
 
-      // Special handling for array methods that modify the array
-      if (Array.isArray(target) && typeof value === `function`) {
-        const arrayMethods = [
-          `push`,
-          `pop`,
-          `shift`,
-          `unshift`,
-          `splice`,
-          `sort`,
-          `reverse`,
-        ]
-        if (arrayMethods.includes(prop as string)) {
-          return function (...args: unknown[]) {
-            // Get current array state
-            const array = Array.from(target)
-            const result = Array.prototype[
-              prop as keyof typeof Array.prototype
-            ].apply(array, args)
-            const currentPath = path.join(`.`)
-
-            switch (prop) {
+            switch (method) {
               case `push`:
-                if (args.length === 1) {
-                  delta.$push![currentPath] = args[0]
-                } else {
-                  delta.$append![currentPath] = args
-                }
+                if (!delta.$push) delta.$push = {}
+                delta.$push[fullPath] = args.length === 1 ? args[0] : args
                 break
-
-              case `unshift`:
-                if (args.length === 1) {
-                  delta.$prepend![currentPath] = [args[0]]
-                } else {
-                  delta.$prepend![currentPath] = args
-                }
-                break
-
               case `pop`:
-                delta.$pop![currentPath] = 1
+                if (!delta.$pop) delta.$pop = {}
+                delta.$pop[fullPath] = 1
                 break
-
               case `shift`:
-                delta.$pop![currentPath] = -1
+                if (!delta.$pop) delta.$pop = {}
+                delta.$pop[fullPath] = -1
                 break
-
+              case `unshift`:
+                if (!delta.$prepend) delta.$prepend = {}
+                delta.$prepend[fullPath] = args
+                break
               case `splice`:
-                delta.$splice![currentPath] = args
+                if (!delta.$splice) delta.$splice = {}
+                delta.$splice[fullPath] = args
                 break
-
               case `sort`:
               case `reverse`:
-                delta.$set![currentPath] = array
+                // For sort/reverse, we need to capture the full new array
+                if (!delta.$set) delta.$set = {}
+                delta.$set[fullPath] = [...target]
                 break
             }
-
-            // Store the new array state
-            for (let i = 0; i < array.length; i++) {
-              setValue(i, array[i])
-            }
-            setValue(`length`, array.length)
-
-            emitDelta()
             return result
           }
         }
-      }
 
-      // Special handling for Set and Map methods
-      if (
-        (target instanceof Set || target instanceof Map) &&
-        typeof value === `function`
-      ) {
-        const currentPath = path.join(`.`)
-        const methodsToTrack =
-          target instanceof Set
-            ? [`add`, `delete`, `clear`]
-            : [`set`, `delete`, `clear`]
-
-        if (methodsToTrack.includes(prop as string)) {
-          return function (...args: unknown[]) {
-            const collection =
-              target instanceof Set ? new Set(target) : new Map(target)
-            const result = collection[
-              prop as keyof (Set<unknown> | Map<unknown, unknown>)
-            ](...args)
-            setValue(prop, collection)
-            delta.$set![currentPath] = collection
-            emitDelta()
-            return result
-          }
-        }
-        return value.bind(target)
-      }
-
-      if (value && typeof value === `object` && !(value instanceof RegExp)) {
-        // Initialize affected WeakMap for nested objects
-        if (!affected.has(value)) {
-          affected.set(value, new Map())
+        // If value is an object, create a new proxy for it
+        if (value && typeof value === `object`) {
+          return createNestedProxy(value as T, [...currentPath, prop])
         }
 
-        // Create a new proxy for this nested object
-        const nestedProxy = createMutationProxy(
-          value,
-          {
-            onMutation: (childDelta) => {
-              // Merge child delta into our delta
-              Object.entries(childDelta).forEach(([op, values]) => {
-                if (values && Object.keys(values).length > 0) {
-                  delta[op as keyof DeltaOperation] = {
-                    ...(delta[op as keyof DeltaOperation] || {}),
-                    ...values,
-                  }
-                }
-              })
-              emitDelta()
-            },
-          },
-          [...path, prop]
-        )
+        return value
+      },
 
-        // Store the proxy so we return the same one next time
-        setValue(prop, nestedProxy)
-        return nestedProxy
-      }
+      set(target, prop, value, receiver) {
+        const prevValue = Reflect.get(target, prop, receiver)
+        const result = Reflect.set(target, prop, value, receiver)
 
-      return value
-    },
-
-    set(target, prop, value, receiver) {
-      if (typeof prop === `symbol`) {
-        return Reflect.set(target, prop, value, receiver)
-      }
-
-      // Initialize affected WeakMap for new object values
-      if (value && typeof value === `object`) {
-        if (!affected.has(value)) {
-          affected.set(value, new Map())
+        // Only emit if the value has actually changed
+        if (result && !Object.is(prevValue, value)) {
+          const fullPath = buildPath([...currentPath, prop])
+          if (!delta.$set) delta.$set = {}
+          delta.$set[fullPath] = value
         }
-      }
 
-      const prevValue = getValue(prop)
-      setValue(prop, value)
+        return result
+      },
 
-      // Only emit if the value has actually changed
-      if (prevValue !== value) {
-        // Create objects for comparison with only the changed property
-        const prevObj = { [prop]: prevValue }
-        const nextObj = { [prop]: value }
+      deleteProperty(target, prop) {
+        const result = Reflect.deleteProperty(target, prop)
 
-        if (isChanged(prevObj, nextObj, affected)) {
-          const currentPath = [...path, prop].join(`.`)
-          delta.$set![currentPath] = value
-          emitDelta()
+        if (result) {
+          const fullPath = buildPath([...currentPath, prop])
+          if (!delta.$unset) delta.$unset = {}
+          delta.$unset[fullPath] = true
         }
+
+        return result
+      },
+    })
+
+    return nestedProxy as T
+  }
+
+  const proxy = createNestedProxy(target)
+
+  // Add getDelta method to the root proxy
+  const getDeltaFn = () => {
+    const result: DeltaOperation = {}
+
+    // Only include non-empty operations
+    for (const key of Object.keys(delta)) {
+      const op = key as keyof DeltaOperation
+      if (Object.keys(delta[op]).length > 0) {
+        if (!result[op]) {
+          result[op] = {}
+        }
+        result[op] = { ...delta[op] }
       }
+    }
 
-      return true
-    },
+    return result
+  }
 
-    deleteProperty(target, prop) {
-      if (typeof prop === `symbol`) {
-        return Reflect.deleteProperty(target, prop)
+  // Create a new proxy with the getDelta method
+  const rootProxy = new Proxy(proxy, {
+    get(target, prop, receiver) {
+      if (prop === `getDelta`) {
+        return getDeltaFn
       }
-
-      const prevValue = getValue(prop)
-      setValue(prop, undefined)
-
-      // Create objects for comparison
-      const prevObj = { [prop]: prevValue }
-      const nextObj = { [prop]: undefined }
-
-      if (isChanged(prevObj, nextObj, affected)) {
-        const currentPath = [...path, prop].join(`.`)
-        delta.$unset![currentPath] = true
-        emitDelta()
-      }
-
-      return true
+      return Reflect.get(target, prop, receiver)
     },
   })
 
-  return proxy as T
+  return rootProxy as T & { getDelta: () => DeltaOperation }
 }
 
-// Export proxy-compare utilities that might be useful for consumers
-export { isChanged, getUntracked, markToTrack }
+export function getUntracked<T>(proxy: T): T {
+  return compareGetUntracked(proxy)
+}

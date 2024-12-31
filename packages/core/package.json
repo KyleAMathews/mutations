@@ -21,7 +21,10 @@
   "author": "Electric SQL",
   "license": "MIT",
   "dependencies": {
-    "proxy-compare": "^3.0.1"
+    "lodash.clonedeep": "^4.5.0",
+    "nanoid": "^5.0.9",
+    "proxy-compare": "^3.0.1",
+    "xstate": "^5.19.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",

@@ -21,6 +21,35 @@
 
 ## Timeline
 
+### 2024-12-24T09:40:34-07:00 [refactor]
+
+- Replaced `id` with `__tracking_id` for internal item tracking
+- Key changes:
+  - Added `__tracking_id` to items in collections and transactions
+  - Remove `__tracking_id` before sending mutations to onMutation handlers
+  - Updated all item lookups to use `__tracking_id` instead of `id`
+  - Ensure `__tracking_id` is not exposed in public APIs
+- Rationale:
+  - Avoid conflicts with user's own `id` fields
+  - Keep internal tracking separate from item data
+  - Prevent tracking IDs from leaking into mutation events
+
+### 2024-12-24T09:27:01-07:00 [refactor]
+
+- Fixed direct context mutations in state machines
+- Key learnings:
+  - Never mutate state machine context directly
+  - All state changes must go through events
+  - Use assign action to update context in response to events
+  - Keep state transitions explicit and trackable
+- Updated collection.ts and transaction.ts to follow these principles
+- Removed direct mutations from insert/update/delete operations
+- Added proper event handling for all state changes
+
+### 2024-12-24T08:31:20-07:00 [docs]
+
+- Always use pnpm for installing packages to ensure consistent dependency management and faster installations
+
 ### 2024-12-23T09:18:30-07:00 [feat]
 
 - Implemented PostgreSQL mutation application

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, test, expect } from 'vitest'
 import { Collection, StandardSchemaV1, SchemaError, Transaction } from '../src'
 import { z } from 'zod'
 
@@ -43,7 +43,7 @@ function createZodSchema<T>(schema: z.ZodType<T>): StandardSchemaV1<T, T> {
 
 describe(`Collection with Schema Validation`, () => {
   describe(`Schema Creation`, () => {
-    it(`should create a collection with a schema`, () => {
+    test(`should create a collection with a schema`, () => {
       const schema = createZodSchema(
         z.object({
           id: z.string(),
@@ -51,18 +51,18 @@ describe(`Collection with Schema Validation`, () => {
           completed: z.boolean(),
         })
       )
-      const collection = new Collection<Todo>({ schema })
+      const collection = new Collection<Todo>({ schema, debug: true })
       expect(collection).toBeDefined()
     })
 
-    it(`should create a collection without a schema`, () => {
-      const collection = new Collection<Todo>()
+    test(`should create a collection without a schema`, () => {
+      const collection = new Collection<Todo>({ debug: true })
       expect(collection).toBeDefined()
     })
   })
 
   describe(`Insert Operations`, () => {
-    it(`should insert valid data`, () => {
+    test(`should insert valid data`, () => {
       const schema = createZodSchema(
         z.object({
           id: z.string(),
@@ -71,7 +71,7 @@ describe(`Collection with Schema Validation`, () => {
         })
       )
 
-      const collection = new Collection<Todo>({ schema })
+      const collection = new Collection<Todo>({ schema, debug: true })
       const item = collection.insert({
         id: `1`,
         title: `Test`,
@@ -83,7 +83,7 @@ describe(`Collection with Schema Validation`, () => {
       expect(collection.getItems()[0].title).toBe(`Test`)
     })
 
-    it(`should reject invalid data`, () => {
+    test(`should reject invalid data`, () => {
       const schema = createZodSchema(
         z.object({
           id: z.string(),
@@ -92,7 +92,7 @@ describe(`Collection with Schema Validation`, () => {
         })
       )
 
-      const collection = new Collection<Todo>({ schema })
+      const collection = new Collection<Todo>({ schema, debug: true })
       const todo = {
         id: `1`,
         title: ``,
@@ -104,7 +104,7 @@ describe(`Collection with Schema Validation`, () => {
   })
 
   describe(`Update Operations`, () => {
-    it(`should track changes`, () => {
+    test(`should track changes`, () => {
       const schema = createZodSchema(
         z.object({
           id: z.string(),
@@ -113,7 +113,7 @@ describe(`Collection with Schema Validation`, () => {
         })
       )
 
-      const collection = new Collection<Todo>({ schema })
+      const collection = new Collection<Todo>({ schema, debug: true })
       let item = collection.insert({
         id: `1`,
         title: `Original`,
@@ -128,7 +128,7 @@ describe(`Collection with Schema Validation`, () => {
       expect(collection.getItems()[0].title).toBe(`Updated`)
     })
 
-    it(`should reject invalid updates`, () => {
+    test(`should reject invalid updates`, () => {
       const schema = createZodSchema(
         z.object({
           id: z.string(),
@@ -137,7 +137,7 @@ describe(`Collection with Schema Validation`, () => {
         })
       )
 
-      const collection = new Collection<Todo>({ schema })
+      const collection = new Collection<Todo>({ schema, debug: true })
       const item = collection.insert({
         id: `1`,
         title: `Test`,
@@ -156,7 +156,7 @@ describe(`Collection with Schema Validation`, () => {
   })
 
   describe(`Transaction Support`, () => {
-    it(`should handle changes within transactions`, () => {
+    test(`should handle changes within transactions`, () => {
       const schema = createZodSchema(
         z.object({
           id: z.string(),
@@ -165,8 +165,8 @@ describe(`Collection with Schema Validation`, () => {
         })
       )
 
-      const collection = new Collection<Todo>({ schema })
-      const transaction = new Transaction()
+      const collection = new Collection<Todo>({ schema, debug: true })
+      const transaction = new Transaction({ debug: true })
       const item = collection.insert(
         {
           id: `1`,
@@ -188,7 +188,7 @@ describe(`Collection with Schema Validation`, () => {
       transaction.commit()
     })
 
-    it(`should validate changes within transactions`, () => {
+    test(`should validate changes within transactions`, () => {
       const schema = createZodSchema(
         z.object({
           id: z.string(),
@@ -197,8 +197,8 @@ describe(`Collection with Schema Validation`, () => {
         })
       )
 
-      const collection = new Collection<Todo>({ schema })
-      const transaction = new Transaction()
+      const collection = new Collection<Todo>({ schema, debug: true })
+      const transaction = new Transaction({ debug: true })
       const item = collection.insert(
         {
           id: `1`,
@@ -208,7 +208,7 @@ describe(`Collection with Schema Validation`, () => {
         { transaction }
       )
 
-      expect(() =>
+      expect(() => {
         collection.update(
           item,
           (todo) => {
@@ -216,12 +216,12 @@ describe(`Collection with Schema Validation`, () => {
           },
           { transaction }
         )
-      ).toThrow(SchemaError)
+      }).toThrow(SchemaError)
     })
   })
 
   describe(`Nested Updates`, () => {
-    it(`should handle nested updates`, () => {
+    test(`should handle nested updates`, () => {
       const schema = createZodSchema(
         z.object({
           id: z.string(),
@@ -232,7 +232,7 @@ describe(`Collection with Schema Validation`, () => {
         })
       )
 
-      const collection = new Collection<NestedTodo>({ schema })
+      const collection = new Collection<NestedTodo>({ schema, debug: true })
       let item = collection.insert({
         id: `1`,
         details: { title: `Test`, priority: 3 },

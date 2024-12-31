@@ -1,94 +1,109 @@
-import { describe, it, expect, vi } from 'vitest'
-import { Transaction } from '../src/transaction'
+import { describe, it, expect } from 'vitest'
+import { Transaction, TransactionStateError } from '../src/transaction'
 
 describe(`Transaction`, () => {
   describe(`Basic Operations`, () => {
-    it(`should create a transaction in pending state`, () => {
+    it(`should create a transaction in began state`, () => {
       const transaction = new Transaction()
-      expect(transaction.isPending()).toBe(true)
+      expect(transaction.isBegan()).toBe(true)
       expect(transaction.isCommitted()).toBe(false)
       expect(transaction.isRolledback()).toBe(false)
     })
 
-    it(`should track changes to an object`, () => {
+    it(`should track insert operations`, () => {
       const transaction = new Transaction()
-      const original = { name: `Test`, value: 42 }
-      const proxy = transaction.track(original)
+      const item = { name: `Test`, value: 42 }
 
-      proxy.name = `Updated`
-      expect(proxy.name).toBe(`Updated`)
-      expect(original.name).toBe(`Updated`) // Direct updates are reflected
-      expect(transaction.getCurrentValue(proxy)).toEqual({
-        name: `Updated`,
-        value: 42,
+      transaction.insert(item)
+      const operations = transaction.getOperations()
+      expect(operations).toHaveLength(1)
+      expect(operations[0]).toMatchObject({
+        type: `insert`,
+        item,
       })
+      expect(operations[0].trackingId).toBeDefined()
     })
 
-    it(`should handle nested objects`, () => {
+    it(`should track update operations`, () => {
       const transaction = new Transaction()
-      const original = {
-        name: `Test`,
-        nested: { value: 42 },
-      }
-      const proxy = transaction.track(original)
+      const item = { name: `Test`, value: 42 }
 
-      proxy.nested.value = 100
-      expect(proxy.nested.value).toBe(100)
-      expect(original.nested.value).toBe(100) // Direct updates are reflected
-      expect(transaction.getCurrentValue(proxy)).toEqual({
-        name: `Test`,
-        nested: { value: 100 },
+      transaction.update(item)
+      const operations = transaction.getOperations()
+      expect(operations).toHaveLength(1)
+      expect(operations[0]).toMatchObject({
+        type: `update`,
+        item,
       })
+      expect(operations[0].trackingId).toBeDefined()
+    })
+
+    it(`should track delete operations`, () => {
+      const transaction = new Transaction()
+      const item = { name: `Test`, value: 42 }
+
+      transaction.delete(item)
+      const operations = transaction.getOperations()
+      expect(operations).toHaveLength(1)
+      expect(operations[0]).toMatchObject({
+        type: `delete`,
+        item,
+      })
+      expect(operations[0].trackingId).toBeDefined()
     })
   })
 
   describe(`State Management`, () => {
     it(`should commit changes`, () => {
       const transaction = new Transaction()
-      const original = { name: `Test`, value: 42 }
-      const proxy = transaction.track(original)
+      const item = { name: `Test`, value: 42 }
 
-      proxy.name = `Updated`
+      transaction.update(item)
       transaction.commit()
 
       expect(transaction.isCommitted()).toBe(true)
-      expect(transaction.isPending()).toBe(false)
-      expect(original.name).toBe(`Updated`)
+      expect(transaction.isBegan()).toBe(false)
     })
 
     it(`should rollback changes`, () => {
       const transaction = new Transaction()
-      const original = { name: `Test`, value: 42 }
-      const proxy = transaction.track(original)
+      const item = { name: `Test`, value: 42 }
 
-      proxy.name = `Updated`
+      transaction.update(item)
       transaction.rollback()
 
       expect(transaction.isRolledback()).toBe(true)
-      expect(transaction.isPending()).toBe(false)
-      expect(original.name).toBe(`Test`)
+      expect(transaction.isBegan()).toBe(false)
     })
 
     it(`should prevent modifications after commit`, () => {
       const transaction = new Transaction()
-      const original = { name: `Test`, value: 42 }
-      const proxy = transaction.track(original)
+      const item = { name: `Test`, value: 42 }
 
       transaction.commit()
       expect(() => {
-        proxy.name = `Updated`
-      }).toThrow(`Transaction is not pending`)
+        transaction.update(item)
+      }).toThrow(TransactionStateError)
+      expect(() => {
+        transaction.update(item)
+      }).toThrow(
+        `Cannot update: transaction is not in began state (current state: committing)`
+      )
     })
 
     it(`should prevent modifications after rollback`, () => {
       const transaction = new Transaction()
-      const original = { name: `Test`, value: 42 }
-      const proxy = transaction.track(original)
+      const item = { name: `Test`, value: 42 }
 
       transaction.rollback()
       expect(() => {
-        proxy.name = `Updated`
-      }).toThrow(`Transaction is not pending`)
+        transaction.update(item)
+      }).toThrow(TransactionStateError)
+      expect(() => {
+        transaction.update(item)
+      }).toThrow(
+        `Cannot update: transaction is not in began state (current state: rollingBack)`
+      )
     })
   })
 
@@ -99,11 +114,21 @@ describe(`Transaction`, () => {
       const obj1 = { ref: shared }
       const obj2 = { ref: shared }
 
-      const proxy1 = transaction.track(obj1)
-      const proxy2 = transaction.track(obj2)
+      transaction.insert(obj1)
+      transaction.insert(obj2)
 
-      proxy1.ref.value = 100
-      expect(proxy2.ref.value).toBe(100)
+      const operations = transaction.getOperations()
+      expect(operations).toHaveLength(2)
+      expect(operations[0]).toMatchObject({
+        type: `insert`,
+        item: obj1,
+      })
+      expect(operations[1]).toMatchObject({
+        type: `insert`,
+        item: obj2,
+      })
+      expect(operations[0].trackingId).toBeDefined()
+      expect(operations[1].trackingId).toBeDefined()
     })
 
     it(`should handle circular references`, () => {
@@ -111,28 +136,15 @@ describe(`Transaction`, () => {
       const obj: Record<string, unknown> = { name: `Test` }
       obj.self = obj as Record<string, unknown>
 
-      const proxy = transaction.track(obj)
-      proxy.name = `Updated`
+      transaction.insert(obj)
 
-      expect(proxy.self.name).toBe(`Updated`)
-      const currentValue = transaction.getCurrentValue(proxy)
-      expect(currentValue.name).toBe(`Updated`)
-      expect(currentValue.self.name).toBe(`Updated`)
-      expect(currentValue.self).toStrictEqual(currentValue) // Circular reference is preserved
-    })
-  })
-
-  describe(`Callbacks`, () => {
-    it(`should call onCommit callback`, async () => {
-      const onCommit = vi.fn()
-      const transaction = new Transaction({ onCommit })
-      const original = { name: `Test` }
-      const proxy = transaction.track(original)
-
-      proxy.name = `Updated`
-      transaction.commit()
-
-      expect(onCommit).toHaveBeenCalled()
+      const operations = transaction.getOperations()
+      expect(operations).toHaveLength(1)
+      expect(operations[0]).toMatchObject({
+        type: `insert`,
+        item: obj,
+      })
+      expect(operations[0].trackingId).toBeDefined()
     })
   })
 })

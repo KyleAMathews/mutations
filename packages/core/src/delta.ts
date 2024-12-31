@@ -1,7 +1,7 @@
 export type DeltaOperation = {
   $set?: Record<string, unknown>
   $unset?: Record<string, true>
-  $push?: Record<string, unknown>
+  $push?: Record<string, unknown | unknown[]>
   $pull?: Record<string, unknown>
   $pop?: Record<string, 1 | -1> // 1 for last element, -1 for first
   $addToSet?: Record<string, unknown>

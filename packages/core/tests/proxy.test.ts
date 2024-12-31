@@ -1,93 +1,63 @@
 import { describe, it, expect } from 'vitest'
 import { createMutationProxy } from '../src/proxy'
-import { DeltaOperation } from '../src/delta'
 
 describe(`createMutationProxy`, () => {
   it(`should track simple property mutations`, () => {
-    const mutations: DeltaOperation[] = []
-    const handler = {
-      onMutation: (delta: DeltaOperation) => mutations.push(delta),
-    }
+    const obj = { foo: `bar` }
+    const proxy = createMutationProxy(obj)
 
-    const obj = createMutationProxy({ foo: `bar` }, handler)
-    obj.foo = `baz`
-
-    expect(mutations).toHaveLength(1)
-    expect(mutations[0].$set).toEqual({
-      foo: `baz`,
-    })
+    expect(proxy.getDelta()).toEqual({})
+    proxy.foo = `baz`
+    expect(proxy.getDelta()).toEqual({ $set: { foo: `baz` } })
   })
 
   it(`should track nested object mutations`, () => {
-    const mutations: DeltaOperation[] = []
-    const handler = {
-      onMutation: (delta: DeltaOperation) => mutations.push(delta),
-    }
+    const obj = { nested: { foo: `bar` } }
+    const proxy = createMutationProxy(obj)
 
-    const obj = createMutationProxy({ nested: { foo: `bar` } }, handler)
-    obj.nested.foo = `baz`
-
-    expect(mutations).toHaveLength(1)
-    expect(mutations[0].$set).toEqual({
-      'nested.foo': `baz`,
-    })
+    expect(proxy.getDelta()).toEqual({})
+    proxy.nested.foo = `baz`
+    expect(proxy.getDelta()).toEqual({ $set: { 'nested.foo': `baz` } })
   })
 
   it(`should track array mutations`, () => {
-    const mutations: DeltaOperation[] = []
-    const handler = {
-      onMutation: (delta: DeltaOperation) => mutations.push(delta),
-    }
+    const obj = { items: [`a`, `b`] }
+    const proxy = createMutationProxy(obj)
 
-    const obj = createMutationProxy({ items: [`a`, `b`] }, handler)
-    obj.items.push(`c`)
-
-    expect(mutations).toHaveLength(1)
-    expect(mutations[0].$push).toEqual({
-      items: `c`,
-    })
+    expect(proxy.getDelta()).toEqual({})
+    proxy.items.push(`c`)
+    expect(proxy.getDelta()).toEqual({ $push: { items: `c` } })
   })
 
   it(`should track property deletions`, () => {
-    const mutations: DeltaOperation[] = []
-    const handler = {
-      onMutation: (delta: DeltaOperation) => mutations.push(delta),
-    }
+    const obj = { foo: `bar` }
+    const proxy = createMutationProxy(obj)
 
-    const obj = createMutationProxy({ foo: `bar` }, handler)
-    delete obj.foo
-
-    expect(mutations).toHaveLength(1)
-    expect(mutations[0].$unset).toEqual({
-      foo: true,
-    })
+    expect(proxy.getDelta()).toEqual({})
+    delete proxy.foo
+    expect(proxy.getDelta()).toEqual({ $unset: { foo: true } })
   })
 
   it(`should not track unchanged values`, () => {
-    const mutations: DeltaOperation[] = []
-    const handler = {
-      onMutation: (delta: DeltaOperation) => mutations.push(delta),
-    }
+    const obj = { foo: `bar` }
+    const proxy = createMutationProxy(obj)
 
-    const obj = createMutationProxy({ foo: `bar` }, handler)
-    obj.foo = `bar` // Same value
-
-    expect(mutations).toHaveLength(0)
+    expect(proxy.getDelta()).toEqual({})
+    proxy.foo = `bar` // Same value
+    expect(proxy.getDelta()).toEqual({})
   })
 
   it(`should handle circular references`, () => {
-    const mutations: DeltaOperation[] = []
-    const handler = {
-      onMutation: (delta: DeltaOperation) => mutations.push(delta),
+    interface CircularObj {
+      foo: string
+      self?: CircularObj
     }
+    const obj: CircularObj = { foo: `bar` }
+    const proxy = createMutationProxy(obj)
 
-    const obj = createMutationProxy({ foo: `bar` }, handler)
-    obj.self = obj
-
-    expect(mutations).toHaveLength(1)
-    expect(mutations[0].$set).toEqual({
-      self: obj,
-    })
+    expect(proxy.getDelta()).toEqual({})
+    proxy.self = proxy
+    expect(proxy.getDelta()).toEqual({ $set: { self: proxy } })
   })
 
   it(`should work with markToTrack`, () => {
@@ -98,203 +68,121 @@ describe(`createMutationProxy`, () => {
       }
     }
 
-    const mutations: DeltaOperation[] = []
-    const handler = {
-      onMutation: (delta: DeltaOperation) => mutations.push(delta),
-    }
+    const obj = new CustomClass(`test`)
+    const proxy = createMutationProxy({ custom: obj })
 
-    const instance = new CustomClass(`test`)
-    const obj = createMutationProxy({ custom: instance }, handler)
-    obj.custom.value = `changed`
-
-    expect(mutations).toHaveLength(1)
-    expect(mutations[0].$set).toEqual({
-      'custom.value': `changed`,
-    })
+    expect(proxy.getDelta()).toEqual({})
+    proxy.custom.value = `changed`
+    expect(proxy.getDelta()).toEqual({ $set: { 'custom.value': `changed` } })
   })
 
   it(`should handle Date objects correctly`, () => {
-    const mutations: DeltaOperation[] = []
-    const handler = {
-      onMutation: (delta: DeltaOperation) => mutations.push(delta),
-    }
-
     const now = new Date()
     const later = new Date(now.getTime() + 1000)
-    const obj = createMutationProxy({ date: now }, handler)
-    obj.date = later
+    const obj = { date: now }
+    const proxy = createMutationProxy(obj)
 
-    expect(mutations).toHaveLength(1)
-    expect(mutations[0].$set).toEqual({
-      date: later,
-    })
-  })
-
-  it(`should handle symbol properties`, () => {
-    const mutations: DeltaOperation[] = []
-    const handler = {
-      onMutation: (delta: DeltaOperation) => mutations.push(delta),
-    }
-
-    const symbol = Symbol(`test`)
-    const obj = createMutationProxy({ [symbol]: `value` }, handler)
-    obj[symbol] = `new value`
-
-    expect(mutations).toHaveLength(0) // Symbols are not tracked
+    expect(proxy.getDelta()).toEqual({})
+    proxy.date = later
+    expect(proxy.getDelta()).toEqual({ $set: { date: later } })
   })
 
   describe(`array operations`, () => {
     it(`should track pop operations`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
-      }
+      const obj = { items: [`a`, `b`, `c`] }
+      const proxy = createMutationProxy(obj)
 
-      const obj = createMutationProxy({ items: [`a`, `b`, `c`] }, handler)
-      const popped = obj.items.pop()
-
+      expect(proxy.getDelta()).toEqual({})
+      const popped = proxy.items.pop()
       expect(popped).toBe(`c`)
-      expect(mutations).toHaveLength(1)
-      expect(mutations[0].$pop).toEqual({
-        items: 1,
-      })
+      expect(proxy.getDelta()).toEqual({ $pop: { items: 1 } })
     })
 
     it(`should track shift operations`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
-      }
+      const obj = { items: [`a`, `b`, `c`] }
+      const proxy = createMutationProxy(obj)
 
-      const obj = createMutationProxy({ items: [`a`, `b`, `c`] }, handler)
-      const shifted = obj.items.shift()
-
+      expect(proxy.getDelta()).toEqual({})
+      const shifted = proxy.items.shift()
       expect(shifted).toBe(`a`)
-      expect(mutations).toHaveLength(1)
-      expect(mutations[0].$pop).toEqual({
-        items: -1,
-      })
+      expect(proxy.getDelta()).toEqual({ $pop: { items: -1 } })
     })
 
     it(`should track unshift operations`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
-      }
+      const obj = { items: [`b`, `c`] }
+      const proxy = createMutationProxy(obj)
 
-      const obj = createMutationProxy({ items: [`b`, `c`] }, handler)
-      obj.items.unshift(`a`)
-
-      expect(mutations).toHaveLength(1)
-      expect(mutations[0].$prepend).toEqual({
-        items: [`a`],
-      })
+      expect(proxy.getDelta()).toEqual({})
+      proxy.items.unshift(`a`)
+      expect(proxy.getDelta()).toEqual({ $prepend: { items: [`a`] } })
     })
 
     it(`should track splice operations`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
-      }
+      const obj = { items: [`a`, `b`, `c`] }
+      const proxy = createMutationProxy(obj)
 
-      const obj = createMutationProxy({ items: [`a`, `b`, `c`] }, handler)
-      obj.items.splice(1, 1, `x`, `y`)
-
-      expect(mutations).toHaveLength(1)
-      expect(mutations[0].$splice).toEqual({
-        items: [1, 1, `x`, `y`],
-      })
+      expect(proxy.getDelta()).toEqual({})
+      proxy.items.splice(1, 1, `x`, `y`)
+      expect(proxy.getDelta()).toEqual({ $splice: { items: [1, 1, `x`, `y`] } })
     })
 
     it(`should track sort operations`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
-      }
+      const obj = { items: [`c`, `a`, `b`] }
+      const proxy = createMutationProxy(obj)
 
-      const obj = createMutationProxy({ items: [`c`, `a`, `b`] }, handler)
-      obj.items.sort()
-
-      expect(mutations).toHaveLength(1)
-      expect(mutations[0].$set).toEqual({
-        items: [`a`, `b`, `c`],
-      })
+      expect(proxy.getDelta()).toEqual({})
+      proxy.items.sort()
+      expect(proxy.getDelta()).toEqual({ $set: { items: [`a`, `b`, `c`] } })
     })
   })
 
   describe(`complex data structures`, () => {
     it(`should handle nested arrays`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
+      const obj = {
+        matrix: [
+          [1, 2],
+          [3, 4],
+        ],
       }
+      const proxy = createMutationProxy(obj)
 
-      const obj = createMutationProxy(
-        {
-          matrix: [
-            [1, 2],
-            [3, 4],
-          ],
-        },
-        handler
-      )
-
-      obj.matrix[0].push(3)
-      obj.matrix[1][1] = 5
-
-      expect(mutations).toHaveLength(2)
-      expect(mutations[0].$push).toEqual({
-        'matrix.0': 3,
-      })
-      expect(mutations[1].$set).toEqual({
-        'matrix.1.1': 5,
-      })
+      expect(proxy.getDelta()).toEqual({})
+      proxy.matrix[0].push(3)
+      proxy.matrix[1][1] = 5
+      const delta = proxy.getDelta()
+      expect(delta.$push).toEqual({ 'matrix.0': 3 })
+      expect(delta.$set).toEqual({ 'matrix.1.1': 5 })
     })
 
     it(`should handle objects with array values`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
+      const obj = {
+        users: [
+          { id: 1, tags: [`a`, `b`] },
+          { id: 2, tags: [`c`] },
+        ],
       }
+      const proxy = createMutationProxy(obj)
 
-      const obj = createMutationProxy(
-        {
-          users: [
-            { id: 1, tags: [`a`, `b`] },
-            { id: 2, tags: [`c`] },
-          ],
-        },
-        handler
-      )
-
-      obj.users[0].tags.push(`d`)
-      obj.users[1].id = 3
-
-      expect(mutations).toHaveLength(2)
-      expect(mutations[0].$push).toEqual({
-        'users.0.tags': `d`,
-      })
-      expect(mutations[1].$set).toEqual({
-        'users.1.id': 3,
-      })
+      expect(proxy.getDelta()).toEqual({})
+      proxy.users[0].tags.push(`d`)
+      proxy.users[1].id = 3
+      const delta = proxy.getDelta()
+      expect(delta.$push).toEqual({ 'users.0.tags': `d` })
+      expect(delta.$set).toEqual({ 'users.1.id': 3 })
     })
 
     it(`should handle Set and Map objects`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
-      }
-
       const set = new Set([`a`, `b`])
       const map = new Map([[`key`, `value`]])
-      const obj = createMutationProxy({ set, map }, handler)
+      const obj = { set, map }
+      const proxy = createMutationProxy(obj)
 
-      obj.set.add(`c`)
-      obj.map.set(`key2`, `value2`)
-
-      expect(mutations).toHaveLength(2)
-      expect(mutations[0].$set.set).toEqual(new Set([`a`, `b`, `c`]))
-      expect(mutations[1].$set.map).toEqual(
+      expect(proxy.getDelta()).toEqual({})
+      proxy.set.add(`c`)
+      proxy.map.set(`key2`, `value2`)
+      const delta = proxy.getDelta()
+      expect(delta.$set.set).toEqual(new Set([`a`, `b`, `c`]))
+      expect(delta.$set.map).toEqual(
         new Map([
           [`key`, `value`],
           [`key2`, `value2`],
@@ -303,33 +191,24 @@ describe(`createMutationProxy`, () => {
     })
 
     it(`should handle deep object mutations`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
-      }
-
-      const obj = createMutationProxy(
-        {
-          a: {
-            b: {
-              c: {
-                d: 1,
-                e: [{ f: 2 }],
-              },
+      const obj = {
+        a: {
+          b: {
+            c: {
+              d: 1,
+              e: [{ f: 2 }],
             },
           },
         },
-        handler
-      )
+      }
+      const proxy = createMutationProxy(obj)
 
-      obj.a.b.c.d = 2
-      obj.a.b.c.e[0].f = 3
-
-      expect(mutations).toHaveLength(2)
-      expect(mutations[0].$set).toEqual({
+      expect(proxy.getDelta()).toEqual({})
+      proxy.a.b.c.d = 2
+      proxy.a.b.c.e[0].f = 3
+      const delta = proxy.getDelta()
+      expect(delta.$set).toEqual({
         'a.b.c.d': 2,
-      })
-      expect(mutations[1].$set).toEqual({
         'a.b.c.e.0.f': 3,
       })
     })
@@ -337,83 +216,56 @@ describe(`createMutationProxy`, () => {
 
   describe(`special types`, () => {
     it(`should handle RegExp objects`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
+      const obj = {
+        pattern: /test/i,
+        patterns: [/foo/, /bar/g],
       }
+      const proxy = createMutationProxy(obj)
 
-      const obj = createMutationProxy(
-        {
-          pattern: /test/i,
-          patterns: [/foo/, /bar/g],
-        },
-        handler
-      )
-
-      obj.pattern = /new/g
-      obj.patterns[0] = /baz/i
-
-      expect(mutations).toHaveLength(2)
-      expect(mutations[0].$set).toEqual({
+      expect(proxy.getDelta()).toEqual({})
+      proxy.pattern = /new/g
+      proxy.patterns[0] = /baz/i
+      const delta = proxy.getDelta()
+      expect(delta.$set).toEqual({
         pattern: /new/g,
-      })
-      expect(mutations[1].$set).toEqual({
         'patterns.0': /baz/i,
       })
     })
 
     it(`should handle BigInt values`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
+      const obj = {
+        big: BigInt(`9007199254740991`),
+        numbers: [BigInt(1), BigInt(2)],
       }
+      const proxy = createMutationProxy(obj)
 
-      const obj = createMutationProxy(
-        {
-          big: BigInt(`9007199254740991`),
-          numbers: [BigInt(1), BigInt(2)],
-        },
-        handler
-      )
-
-      obj.big = BigInt(`9007199254740992`)
-      obj.numbers[1] = BigInt(3)
-
-      expect(mutations).toHaveLength(2)
-      expect(mutations[0].$set).toEqual({
+      expect(proxy.getDelta()).toEqual({})
+      proxy.big = BigInt(`9007199254740992`)
+      proxy.numbers[1] = BigInt(3)
+      const delta = proxy.getDelta()
+      expect(delta.$set).toEqual({
         big: BigInt(`9007199254740992`),
-      })
-      expect(mutations[1].$set).toEqual({
         'numbers.1': BigInt(3),
       })
     })
 
     it(`should handle mixed BigInt and RegExp in complex objects`, () => {
-      const mutations: DeltaOperation[] = []
-      const handler = {
-        onMutation: (delta: DeltaOperation) => mutations.push(delta),
-      }
-
-      const obj = createMutationProxy(
-        {
-          data: {
-            id: BigInt(1),
-            nested: {
-              regex: /foo/i,
-            },
+      const obj = {
+        data: {
+          id: BigInt(1),
+          nested: {
+            regex: /foo/i,
           },
         },
-        handler
-      )
+      }
+      const proxy = createMutationProxy(obj)
 
-      obj.data.id = BigInt(2)
-      obj.data.nested.regex = /bar/g
-
-      expect(mutations).toHaveLength(2)
-      expect(mutations[0].$set).toEqual({
+      expect(proxy.getDelta()).toEqual({})
+      proxy.data.id = BigInt(2)
+      proxy.data.nested.regex = /bar/g
+      const delta = proxy.getDelta()
+      expect(delta.$set).toEqual({
         'data.id': BigInt(2),
-      })
-      expect(mutations[1].$set).toEqual({
         'data.nested.regex': /bar/g,
       })
     })
