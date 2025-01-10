@@ -24,7 +24,7 @@ interface TransactionStateContext<T extends object> {
 }
 
 interface TransactionOptions<T extends object> {
-  parent?: ActorRef<TransactionEvent<T>, TransactionStateContext<T>>
+  parent: ActorRef<TransactionEvent<T>, TransactionStateContext<T>>
   debug?: boolean
 }
 
@@ -46,6 +46,11 @@ type TransactionEvent<T extends object> =
       status: TransactionState
       changes: Array<TransactionOperation<T>>
     }
+  | {
+      type: `REGISTER_TRANSACTION`
+      transactionId: string
+      actor: AnyActorRef
+    }
 
 interface TransactionContext<T extends object> {
   id: string
@@ -55,7 +60,7 @@ interface TransactionContext<T extends object> {
 }
 
 const createTransactionMachine = <T extends object>(
-  options: TransactionOptions<T> = {}
+  options: TransactionOptions<T>
 ) =>
   createMachine(
     {
@@ -195,7 +200,10 @@ export class Transaction<T extends object = object> {
   public actor: AnyActorRef
   private state: State<TransactionContext<T>, TransactionEvent<T>>
 
-  constructor(options: TransactionOptions<T> = {}) {
+  constructor(options: TransactionOptions<T>) {
+    if (!options.parent) {
+      throw new Error(`Transaction requires a parent actor`)
+    }
     const machine = createTransactionMachine(options)
     const actor = createActor(machine)
     actor.subscribe((state) => {
@@ -205,6 +213,12 @@ export class Transaction<T extends object = object> {
     this.actor = actor
 
     this.state = actor.getSnapshot()
+
+    options.parent.send({
+      type: `REGISTER_TRANSACTION`,
+      transactionId: this.id(),
+      actor: this.actor,
+    })
   }
 
   isBegan(): boolean {

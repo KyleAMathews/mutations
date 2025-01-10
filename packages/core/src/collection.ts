@@ -8,11 +8,12 @@ import {
   enqueueActions,
 } from 'xstate'
 import { nanoid } from 'nanoid'
-import { createMutationProxy, getUntracked } from './proxy'
-import cloneDeep from 'lodash.clonedeep'
+import { createMutationProxy } from './proxy'
+import { cloneDeep } from 'lodash'
 
 export interface MutationOptions {
   transaction?: Transaction
+  synced?: boolean
 }
 
 export interface CollectionOptions<T, S extends Schema = Schema> {
@@ -20,6 +21,7 @@ export interface CollectionOptions<T, S extends Schema = Schema> {
   onMutation?: (changes: { type: string; item: T }[]) => Promise<void>
   debug?: boolean
   actor?: AnyActorRef
+  syncEngine: SyncEngine<T>
 }
 
 interface CollectionContext<T> {
@@ -28,6 +30,8 @@ interface CollectionContext<T> {
   transactionActors: Map<string, AnyActorRef>
   pendingItems: Map<string, T & { __tracking_id: string }>
   lockedItems: Map<string, string> // trackingId -> transactionId
+  pendingSyncChanges: Array<ChangeMessage<T>>
+  syncKeyToTrackingId: Map<string, string> // sync key -> tracking id
   batchTransaction: {
     actor: AnyActorRef | null
     id: string
@@ -43,16 +47,44 @@ interface CollectionContext<T> {
   debug: boolean
   schema?: Schema
   onMutation?: (changes: { type: string; item: T }[]) => Promise<void>
+  collection: Collection<T> | null
+  isUpToDate: boolean
+}
+
+export type Row = Record<string, unknown>
+
+export type ChangeMessage<T extends Row = Row> = {
+  key: string
+  value: T
+  headers: {
+    operation: `insert` | `update` | `delete`
+  }
+  offset: number
+}
+
+export type ControlMessage = {
+  headers: {
+    control: `up-to-date`
+  }
+}
+
+export type SyncMessage<T extends Row = Row> = ChangeMessage<T> | ControlMessage
+
+export interface SyncEngine<T extends Row> {
+  subscribe(onMessage: (message: SyncMessage<T>) => void): () => void
 }
 
 type CollectionEvent<T> =
   | {
       type: `MUTATE`
       operation: `insert` | `update` | `delete`
-      item: T
-      trackingId: string
+      item?: T
+      items?: Map<string, T & { __tracking_id: string }>
+      syncKeyToTrackingId?: Map<string, string>
+      trackingId?: string
       updater?: (item: T) => void
       transaction?: AnyActorRef
+      synced?: boolean
     }
   | { type: `PROCESS_BATCH` }
   | {
@@ -61,24 +93,43 @@ type CollectionEvent<T> =
       status: `committed` | `rolledback`
       changes?: Array<{ type: string; item: T }>
     }
+  | {
+      type: `ACCUMULATE_SYNC_CHANGE`
+      message: ChangeMessage<T>
+    }
+  | {
+      type: `REGISTER_TRANSACTION`
+      transactionId: string
+      actor: AnyActorRef
+    }
+  | {
+      type: `SET_COLLECTION`
+      collection: Collection<T>
+    }
+  | {
+      type: `MARK_UP_TO_DATE`
+    }
 
 const createCollectionMachine = <T extends object>(
   options: CollectionOptions<T> = {}
-) =>
-  createMachine(
+) => {
+  const id = nanoid()
+  return createMachine(
     {
       types: {} as {
         context: CollectionContext<T>
         events: CollectionEvent<T>
       },
-      id: `collection`,
+      id: `collection-${id}`,
       initial: `active`,
       context: {
-        id: nanoid(),
+        id,
         items: new Map<string, T & { __tracking_id: string }>(),
         transactionActors: new Map<string, AnyActorRef>(),
         pendingItems: new Map<string, T & { __tracking_id: string }>(),
         lockedItems: new Map<string, string>(),
+        pendingSyncChanges: [],
+        syncKeyToTrackingId: new Map<string, string>(),
         batchTransaction: {
           actor: null,
           id: nanoid(),
@@ -88,6 +139,8 @@ const createCollectionMachine = <T extends object>(
         debug: options.debug ?? false,
         schema: options.schema,
         onMutation: options.onMutation,
+        collection: null,
+        isUpToDate: false,
       } as CollectionContext<T>,
       states: {
         active: {
@@ -100,6 +153,18 @@ const createCollectionMachine = <T extends object>(
                 actions: [
                   `trackPendingItem`,
                   `forwardToTransaction`,
+                  `logMutation`,
+                ],
+              },
+              {
+                guard: ({ event }) => {
+                  return event.synced && event.items
+                },
+                actions: [
+                  assign(({ event }) => ({
+                    items: event.items,
+                    syncKeyToTrackingId: event.syncKeyToTrackingId,
+                  })),
                   `logMutation`,
                 ],
               },
@@ -142,7 +207,11 @@ const createCollectionMachine = <T extends object>(
                     if (value === event.transactionId) {
                       newLocks.delete(key)
                     }
+                    if (value === `batch-transaction`) {
+                      newLocks.delete(key)
+                    }
                   })
+                  console.log({ newLocks })
 
                   // Clean up transaction actors
                   const newTransactionActors = new Map(
@@ -150,18 +219,23 @@ const createCollectionMachine = <T extends object>(
                   )
                   newTransactionActors.delete(event.transactionId)
 
-                  // Reset batch transaction state
-                  return {
+                  // Reset batch transaction state if this was a batch transaction
+                  const newState = {
                     items: newItems,
                     lockedItems: newLocks,
                     transactionActors: newTransactionActors,
-                    batchTransaction: {
+                  }
+
+                  if (event.transactionId === context.batchTransaction.id) {
+                    newState.batchTransaction = {
                       actor: null,
                       pendingMutations: [],
                       batchScheduled: false,
-                    },
-                    pendingItems: new Map(),
+                    }
+                    newState.pendingItems = new Map()
                   }
+
+                  return newState
                 }),
                 ({ context, event }) => {
                   if (!event.changes || event.status === `rolledback`) return
@@ -197,6 +271,37 @@ const createCollectionMachine = <T extends object>(
                   })
                 },
               ],
+            },
+            ACCUMULATE_SYNC_CHANGE: {
+              actions: assign(({ context, event }) => {
+                if (event.type !== `ACCUMULATE_SYNC_CHANGE`) return {}
+
+                return {
+                  pendingSyncChanges: [
+                    ...context.pendingSyncChanges,
+                    event.message,
+                  ],
+                }
+              }),
+            },
+            REGISTER_TRANSACTION: {
+              actions: assign(({ context, event }) => {
+                if (event.type !== `REGISTER_TRANSACTION`) return {}
+                const newTransactionActors = new Map(context.transactionActors)
+                newTransactionActors.set(event.transactionId, event.actor)
+                return { transactionActors: newTransactionActors }
+              }),
+            },
+            SET_COLLECTION: {
+              actions: assign(({ event }) => {
+                if (event.type !== `SET_COLLECTION`) return {}
+                return { collection: event.collection }
+              }),
+            },
+            MARK_UP_TO_DATE: {
+              actions: assign(() => ({
+                isUpToDate: true,
+              })),
             },
           },
         },
@@ -396,26 +501,6 @@ const createCollectionMachine = <T extends object>(
           newTransactionActors.delete(event.transactionId)
           return { transactionActors: newTransactionActors }
         }),
-        notifyMutationsIfNeeded: ({ context, event }) => {
-          if (
-            event.type !== `TRANSACTION_COMPLETED` ||
-            !event.changes ||
-            event.status === `rolledback`
-          )
-            return
-          if (context.debug) {
-            console.log(
-              `[Collection ${context.id}] Notifying mutations:`,
-              event.changes
-            )
-          }
-          context.onMutation?.(event.changes).catch((error) => {
-            console.log(
-              `[Collection ${context.id}] Error in onMutation:`,
-              error
-            )
-          })
-        },
         logMutation: ({ context, event }) => {
           if (event.type !== `MUTATE` || !context.debug) return
           console.log(`[Collection ${context.id}] Mutation:`, {
@@ -441,20 +526,38 @@ const createCollectionMachine = <T extends object>(
       },
     }
   )
+}
 
 export class Collection<T extends object, S extends Schema = Schema> {
   public actor: AnyActorRef
   private context: CollectionContext<T>
+  private unsubscribeSync?: () => void
 
   constructor(private options: CollectionOptions<T, S> = {}) {
     const machine = createCollectionMachine({ ...options })
-    this.actor = createActor(machine)
-    this.actor.subscribe((snapshot) => {
-      console.log(`[Collection] state:`, snapshot.value)
-      this.context = snapshot.context
+    const actor = createActor(machine)
+    actor.subscribe((state) => {
+      this.context = state.context
+      // Check if we can apply pending changes after context update
+      if (
+        state.context.pendingSyncChanges.length > 0 &&
+        state.context.transactionActors.size === 0 &&
+        !state.context.batchTransaction.actor &&
+        state.context.isUpToDate
+      ) {
+        this.applyPendingChanges()
+      }
     })
-    this.actor.start()
-    this.context = this.actor.getSnapshot().context
+    actor.start()
+    this.actor = actor
+
+    // Set collection reference in context
+    this.actor.send({
+      type: `SET_COLLECTION`,
+      collection: this,
+    })
+
+    this.context = actor.getSnapshot().context
 
     if (this.options.debug) {
       console.log(
@@ -462,6 +565,121 @@ export class Collection<T extends object, S extends Schema = Schema> {
         options
       )
     }
+
+    // Initialize the sync engine
+    this.initializeSync(options.syncEngine)
+  }
+
+  private initializeSync(syncEngine: SyncEngine<T>) {
+    this.unsubscribeSync = syncEngine.subscribe((message) => {
+      if (`control` in message.headers) {
+        if (message.headers.control === `up-to-date`) {
+          this.actor.send({ type: `MARK_UP_TO_DATE` })
+        }
+      } else {
+        this.actor.send({
+          type: `ACCUMULATE_SYNC_CHANGE`,
+          message,
+        })
+      }
+    })
+  }
+
+  public applyPendingChanges() {
+    console.log(`applyPendingChanges`)
+    // If there are still active transactions or we're not up-to-date, don't apply changes yet
+    if (
+      this.context.transactionActors.size > 0 ||
+      this.context.batchTransaction.actor ||
+      !this.context.isUpToDate
+    ) {
+      console.log(`there's still actors or not up-to-date`)
+      return
+    }
+
+    console.log(`[Collection] Starting to apply pending changes`)
+    const changes = this.context.pendingSyncChanges.sort(
+      (a, b) => a.offset - b.offset
+    )
+
+    console.log(`[Collection] Applying changes:`, changes)
+
+    // Create new maps to track all state changes
+    const newItems = new Map(this.context.items)
+    const newSyncKeyToTrackingId = new Map(this.context.syncKeyToTrackingId)
+
+    // Apply all changes in order
+    for (const change of changes) {
+      // Find existing item by sync key
+      const existingTrackingId = newSyncKeyToTrackingId.get(change.key)
+      const existingItem = existingTrackingId
+        ? newItems.get(existingTrackingId)
+        : undefined
+
+      console.log({
+        change,
+        newItems,
+        existingTrackingId,
+        existingItem,
+        context: this.context,
+      })
+
+      // Ensure we have a tracking ID
+      const trackingId = existingTrackingId || nanoid()
+      change.value.__tracking_id = trackingId
+
+      switch (change.headers.operation) {
+        case `insert`:
+          // For inserts, we always add/update the item and mapping
+          newItems.set(trackingId, change.value)
+          newSyncKeyToTrackingId.set(change.key, trackingId)
+          break
+
+        case `update`:
+          if (existingItem) {
+            // Update existing item with new values
+            const updatedItem = { ...existingItem }
+            for (const [key, value] of Object.entries(change.value)) {
+              if (key !== `__tracking_id`) {
+                updatedItem[key] = value
+              }
+            }
+            newItems.set(trackingId, updatedItem)
+
+            // If there's an existing proxy, update it too
+            const existingProxy = this.context.pendingItems.get(trackingId)
+            console.log({ existingProxy })
+            if (existingProxy) {
+              for (const [key, value] of Object.entries(change.value)) {
+                if (key !== `__tracking_id`) {
+                  existingProxy[key] = value
+                }
+              }
+            }
+          }
+          break
+
+        case `delete`:
+          if (existingTrackingId) {
+            newItems.delete(existingTrackingId)
+            newSyncKeyToTrackingId.delete(change.key)
+          }
+          break
+      }
+    }
+
+    // Update state atomically
+    this.actor.send({
+      type: `MUTATE`,
+      operation: `update`,
+      items: newItems,
+      syncKeyToTrackingId: newSyncKeyToTrackingId,
+      synced: true,
+    })
+
+    // Clear pending changes
+    this.context.pendingSyncChanges = []
+    console.log(`[Collection] Changes applied`)
   }
 
   isItemLocked(trackingId: string, transactionId?: string): boolean {
@@ -474,6 +692,7 @@ export class Collection<T extends object, S extends Schema = Schema> {
   lockItem(trackingId: string, transactionId: string) {
     console.log(`lockItem called`, { trackingId, transactionId })
     if (this.isItemLocked(trackingId, transactionId)) {
+      console.log(`yes it is locked`)
       throw new Error(
         `Item ${trackingId} is already locked by transaction ${this.context.lockedItems.get(
           trackingId
@@ -484,6 +703,7 @@ export class Collection<T extends object, S extends Schema = Schema> {
   }
 
   unlockItem(trackingId: string, transactionId: string) {
+    console.log(`unlockItem called`, { trackingId, transactionId })
     const lockedBy = this.context.lockedItems.get(trackingId)
     if (lockedBy === transactionId) {
       this.context.lockedItems.delete(trackingId)
@@ -543,27 +763,35 @@ export class Collection<T extends object, S extends Schema = Schema> {
       })
     }
 
+    console.log(1)
     // Validate the item before doing anything else
     if (this.options.schema) {
       this.validateItem(item)
     }
+    console.log(2)
 
     const trackingId = nanoid()
     const itemWithTracking = { ...item, __tracking_id: trackingId }
+    console.log(3)
 
     const proxy = this.createTrackedProxy(itemWithTracking)
+    console.log(4)
     console.log({ proxy, pendingItems: this.context.pendingItems })
+    console.log(5)
 
     const transactionId = options.transaction
       ? options.transaction.id()
       : `batch-transaction`
+    console.log(6)
 
     console.log({
       transactionId,
       options,
       batchTransaction: this.context.batchTransaction,
     })
+    console.log(7)
     this.lockItem(trackingId, transactionId)
+    console.log(8)
 
     this.actor.send({
       type: `MUTATE`,
@@ -572,6 +800,7 @@ export class Collection<T extends object, S extends Schema = Schema> {
       trackingId,
       transaction: options.transaction?.actor,
     })
+    console.log(9)
 
     return proxy
   }
@@ -592,6 +821,7 @@ export class Collection<T extends object, S extends Schema = Schema> {
       console.log(`[Collection ${this.context.id}] Update:`, {
         item,
         hasTransaction: !!options.transaction,
+        synced: !!options.synced,
       })
     }
 
@@ -600,66 +830,39 @@ export class Collection<T extends object, S extends Schema = Schema> {
       ? options.transaction.id()
       : `batch-transaction`
 
-    console.log({
-      transactionId,
-      options,
-      batchTransaction: this.context.batchTransaction,
-    })
-
     // Try to get a lock on this item.
     this.lockItem(trackingId, transactionId)
 
-    // Check if we already have a proxy for this item
-    const existingProxy = this.context.pendingItems.get(trackingId)
-    console.log(1, { existingProxy })
-    if (existingProxy) {
-      // Run updater which may throw validation errors
-      if (this.options.schema) {
-        // Get raw object using getUntracked
-        console.log(`isProxy`, existingProxy.__isProxy)
-        const rawObject = getUntracked({ ...existingProxy })
-        console.log(2, { existingProxy, rawObject })
-        const tempProxy = createMutationProxy(cloneDeep(existingProxy))
-        updater(tempProxy as T)
-        console.log({ tempProxy })
-        this.validateItem(tempProxy)
-      }
-      console.log(
-        `figuring out untracked`,
-        existingProxy,
-        getUntracked(existingProxy)
-      )
-      // If validation passed, apply to real proxy
-      updater(existingProxy as T)
-      this.actor.send({
-        type: `MUTATE`,
-        operation: `update`,
-        item: existingProxy,
-        trackingId,
-        updater,
-        transaction: options.transaction?.actor,
-      })
-
-      return existingProxy
+    // Get the item from either items or pendingItems map
+    let existingItem = this.context.items.get(trackingId)
+    if (!existingItem) {
+      existingItem = this.context.pendingItems.get(trackingId)
     }
-
-    console.log({
-      item,
-      trackingId,
-      items: this.context.items,
-      pendingItems: this.context.pendingItems,
-    })
-    // Get the original item
-    const existingItem = this.context.items.get(trackingId)
     if (!existingItem) {
       throw new Error(`Item not found`)
     }
 
-    // Create new proxy and validate changes
-    const proxy = this.createTrackedProxy(existingItem)
+    // For synced updates, first update the immutable server version
+    if (options.synced) {
+      const updatedItem = { ...existingItem }
+      updater(updatedItem)
+      this.context.items.set(trackingId, updatedItem)
+    }
+
+    // Check if we already have a proxy for this item in pendingItems
+    let proxy = this.context.pendingItems.get(trackingId)
+    if (!proxy) {
+      // If no pending proxy exists, create one from the existing item
+      proxy = this.createTrackedProxy(existingItem)
+      this.context.pendingItems.set(trackingId, proxy)
+    }
+
     if (this.options.schema) {
-      const tempProxy = createMutationProxy(proxy)
+      // Create a deep clone for validation to avoid modifying the original
+      const clonedItem = cloneDeep(proxy)
+      const tempProxy = createMutationProxy(clonedItem)
       updater(tempProxy as T)
+      // This will throw SchemaError if validation fails
       this.validateItem(tempProxy)
     }
 

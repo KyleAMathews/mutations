@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'vitest'
-import { Collection } from '../src/collection'
+import { Collection, type Row, type SyncEngine } from '../src/collection'
 import { Transaction } from '../src/transaction'
 
-interface TestItem {
+interface TestItem extends Row {
   title?: string
   count?: number
   id?: string
@@ -15,12 +15,20 @@ interface Mutation {
   item: TestItem
 }
 
+class NoopSyncEngine<T extends Row> implements SyncEngine<T> {
+  subscribe() {
+    // Do nothing
+    return () => {}
+  }
+}
+
 describe(`Collection`, () => {
   test(`should track mutations on inserted items`, async () => {
     console.log(1)
     const mutations: Mutation[] = []
     const collection = new Collection<TestItem>({
       debug: true,
+      syncEngine: new NoopSyncEngine(),
       onMutation: async (changes) => {
         console.log(`onMutation called`, changes)
         mutations.push(...changes)
@@ -58,6 +66,7 @@ describe(`Collection`, () => {
     const mutations: Mutation[] = []
     const collection = new Collection<TestItem>({
       debug: true,
+      syncEngine: new NoopSyncEngine(),
       onMutation: async (changes) => {
         mutations.push(...changes)
       },
@@ -92,7 +101,9 @@ describe(`Collection`, () => {
 
 describe(`Delta Tracking`, () => {
   test(`should track specific changes made to items`, () => {
-    const collection = new Collection<TestItem>()
+    const collection = new Collection<TestItem>({
+      syncEngine: new NoopSyncEngine(),
+    })
     const tx = new Transaction({ parent: collection.actor })
 
     const item = collection.insert(
@@ -119,8 +130,10 @@ describe(`Delta Tracking`, () => {
   })
 
   test(`should optimize multiple updates to same property`, () => {
-    const collection = new Collection<TestItem>()
-    const tx = new Transaction()
+    const collection = new Collection<TestItem>({
+      syncEngine: new NoopSyncEngine(),
+    })
+    const tx = new Transaction({ parent: collection.actor })
 
     const item = collection.insert(
       { id: `1`, title: `Original`, count: 0 },
@@ -159,7 +172,9 @@ describe(`Delta Tracking`, () => {
   })
 
   test(`should handle array operations`, () => {
-    const collection = new Collection<TestItem & { items: string[] }>()
+    const collection = new Collection<TestItem & { items: string[] }>({
+      syncEngine: new NoopSyncEngine(),
+    })
     const tx = new Transaction({ parent: collection.actor })
 
     const item = collection.insert(
@@ -185,9 +200,11 @@ describe(`Delta Tracking`, () => {
 
 describe(`Transaction Isolation`, () => {
   test(`should ensure single-transaction access to items`, () => {
-    const collection = new Collection<TestItem>()
-    const tx1 = new Transaction()
-    const tx2 = new Transaction()
+    const collection = new Collection<TestItem>({
+      syncEngine: new NoopSyncEngine(),
+    })
+    const tx1 = new Transaction({ parent: collection.actor })
+    const tx2 = new Transaction({ parent: collection.actor })
 
     const item = collection.insert(
       { id: `1`, title: `Original` },
@@ -216,7 +233,10 @@ describe(`Transaction Isolation`, () => {
   })
 
   test(`should track deltas for updates`, () => {
-    const collection = new Collection<TestItem>({ debug: true })
+    const collection = new Collection<TestItem>({
+      debug: true,
+      syncEngine: new NoopSyncEngine(),
+    })
     const tx = new Transaction({ debug: true, parent: collection.actor })
 
     console.log(1)
@@ -251,8 +271,11 @@ describe(`Transaction Isolation`, () => {
   })
 
   test(`should handle remove operation correctly`, () => {
-    const collection = new Collection<TestItem>({ debug: true })
-    const tx = new Transaction({ debug: true })
+    const collection = new Collection<TestItem>({
+      debug: true,
+      syncEngine: new NoopSyncEngine(),
+    })
+    const tx = new Transaction({ parent: collection.actor })
 
     const item = collection.insert(
       { id: `1`, title: `Test` },
@@ -277,6 +300,7 @@ describe(`Transaction Isolation`, () => {
   test(`should batch mutations within same tick`, async () => {
     const mutations: Array<{ type: string; item: TestItem }> = []
     const collection = new Collection<TestItem>({
+      syncEngine: new NoopSyncEngine(),
       onMutation: async (changes) => {
         mutations.push(...changes)
       },
@@ -303,6 +327,7 @@ describe(`Transaction Isolation`, () => {
   test(`should unlock after the initial transaction is committed`, async () => {
     const mutations: Array<{ type: string; item: TestItem }> = []
     const collection = new Collection<TestItem>({
+      syncEngine: new NoopSyncEngine(),
       onMutation: async (changes) => {
         mutations.push(...changes)
       },

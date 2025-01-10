@@ -166,6 +166,12 @@ export function createMutationProxy<T extends object>(
       },
 
       set(target, prop, value, receiver) {
+        console.log(`Proxy set:`, {
+          target,
+          prop,
+          value,
+          trackingId: target.__tracking_id,
+        })
         const prevValue = Reflect.get(target, prop, receiver)
         const result = Reflect.set(target, prop, value, receiver)
 

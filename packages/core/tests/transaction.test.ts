@@ -1,17 +1,29 @@
 import { describe, it, expect } from 'vitest'
 import { Transaction, TransactionStateError } from '../src/transaction'
+import { createActor, createMachine } from 'xstate'
+
+function createMockParentActor() {
+  const machine = createMachine({
+    id: `mockParent`,
+    initial: `idle`,
+    states: {
+      idle: {},
+    },
+  })
+  return createActor(machine).start()
+}
 
 describe(`Transaction`, () => {
   describe(`Basic Operations`, () => {
     it(`should create a transaction in began state`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       expect(transaction.isBegan()).toBe(true)
       expect(transaction.isCommitted()).toBe(false)
       expect(transaction.isRolledback()).toBe(false)
     })
 
     it(`should track insert operations`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       const item = { name: `Test`, value: 42 }
 
       transaction.insert(item)
@@ -25,7 +37,7 @@ describe(`Transaction`, () => {
     })
 
     it(`should track update operations`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       const item = { name: `Test`, value: 42 }
 
       transaction.update(item)
@@ -39,7 +51,7 @@ describe(`Transaction`, () => {
     })
 
     it(`should track delete operations`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       const item = { name: `Test`, value: 42 }
 
       transaction.delete(item)
@@ -55,7 +67,7 @@ describe(`Transaction`, () => {
 
   describe(`State Management`, () => {
     it(`should commit changes`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       const item = { name: `Test`, value: 42 }
 
       transaction.update(item)
@@ -66,7 +78,7 @@ describe(`Transaction`, () => {
     })
 
     it(`should rollback changes`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       const item = { name: `Test`, value: 42 }
 
       transaction.update(item)
@@ -77,7 +89,7 @@ describe(`Transaction`, () => {
     })
 
     it(`should prevent modifications after commit`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       const item = { name: `Test`, value: 42 }
 
       transaction.commit()
@@ -92,7 +104,7 @@ describe(`Transaction`, () => {
     })
 
     it(`should prevent modifications after rollback`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       const item = { name: `Test`, value: 42 }
 
       transaction.rollback()
@@ -109,7 +121,7 @@ describe(`Transaction`, () => {
 
   describe(`Object Reference Handling`, () => {
     it(`should reuse existing proxies`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       const shared = { value: 42 }
       const obj1 = { ref: shared }
       const obj2 = { ref: shared }
@@ -132,7 +144,7 @@ describe(`Transaction`, () => {
     })
 
     it(`should handle circular references`, () => {
-      const transaction = new Transaction()
+      const transaction = new Transaction({ parent: createMockParentActor() })
       const obj: Record<string, unknown> = { name: `Test` }
       obj.self = obj as Record<string, unknown>
 
